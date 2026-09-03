@@ -8,7 +8,7 @@
 [![API Version](https://img.shields.io/badge/API-v67.0-0176D3)](sfdx-project.json)
 [![License](https://img.shields.io/badge/License-Unlicense-lightgrey)](#)
 [![Tests](https://img.shields.io/badge/tests-10%20classes-brightgreen)](#tests)
-[![Status](https://img.shields.io/badge/status-v1.1-brightgreen)](#changelog)
+[![Status](https://img.shields.io/badge/status-v1.2-brightgreen)](#changelog)
 
 *Inspired by [Nebula Logger](https://github.com/jongpie/NebulaLogger)'s core idea — reimplemented lean, and platform-event-backed from the ground up.*
 
@@ -89,8 +89,9 @@ try {
     // risky callout
 } catch (Exception ex) {
     Logger.error('CBHttpClient.patchShippingAddress', 'Chargebee PATCH failed', ex);
+} finally {
+    Logger.flush(); // see "Governor limits" below for why this must be exactly one call, not one per error
 }
-Logger.flush(); // ERROR auto-flushes; call explicitly for INFO/DEBUG/WARN buffers
 ```
 
 **Log from Flow:** use the *"Log Message"* invocable action (see [Logging from Flow](#logging-from-flow) below).
@@ -148,6 +149,27 @@ One place to maintain across every BMG/Level Data Flow instead of repeating the 
 
 ---
 
+## Governor limits (why flush() works the way it does)
+
+`EventBus.publish()` is capped at **150 calls per transaction** — a hard Apex governor limit. Critically, a single `EventBus.publish(list)` call counts as **one** call no matter how many events are in the list, the same way `Database.insert(list)` counts as one DML statement regardless of list size.
+
+**`Logger` buffers every entry in memory and only publishes on `flush()`** — mirroring [Nebula Logger](https://github.com/jongpie/NebulaLogger)'s model. An earlier version of this class auto-flushed on every `ERROR` call individually; that meant a loop catching 200 errors made 200 separate `publish()` calls and risked the 150-per-transaction ceiling. Buffering avoids that entirely.
+
+The trade-off: **you must call `Logger.flush()` yourself** — ideally in a `finally` block, so it still runs even when an exception propagates past your `catch`. A buffered entry that never reaches `flush()` is silently lost.
+
+Additional controls (same names as Nebula Logger's, for anyone already familiar with it):
+
+| Method | Behavior |
+|---|---|
+| `Logger.flush()` | Publish everything buffered so far as one call |
+| `Logger.flushBuffer()` | Discard everything buffered, without publishing |
+| `Logger.suspendSaving()` / `resumeSaving()` | Ignore log calls entirely until resumed — useful for silencing a known-noisy code path without removing call sites |
+| `Logger.setSyncMode(true)` | Bypass platform events and insert `Log__c`/`Log_Entry__c` directly and synchronously — for local debugging (see the real DML error immediately) or as a fallback if your org's platform event allocation is exhausted. **Loses rollback-safety while enabled.** |
+
+There's also a separate, **org-wide** daily/hourly limit on platform events published (varies by edition — see [Salesforce's Platform Event Limits](https://developer.salesforce.com/docs/atlas.en-us.platform_events.meta/platform_events/platform_event_limits.htm)). Batching solves the per-transaction risk; it doesn't remove this ceiling. Nebula Logger's own troubleshooting docs flag the same thing — worth monitoring in a very high-volume org.
+
+---
+
 ## Configuration (all Custom Metadata — no deploy required)
 
 | Custom Metadata Type | Controls |
@@ -181,6 +203,17 @@ See **[`PACKAGING.md`](PACKAGING.md)** for the full `sf package create` → `ver
 ## Changelog
 
 <details open>
+<summary><strong>v1.2</strong> — Fixed a governor-limit bug in Logger's flush behavior</summary>
+
+- **Fix:** removed an auto-flush-on-every-`ERROR`-call bug that could exceed the 150-`EventBus.publish()`-calls-per-transaction limit in any loop logging many errors
+- `Logger` now buffers everything and only publishes on explicit `flush()`, matching Nebula Logger's model
+- Added `flushBuffer()`, `suspendSaving()`/`resumeSaving()`, and `setSyncMode()` — mirrors Nebula Logger's save-control API
+- New README section: [Governor limits](#governor-limits-why-flush-works-the-way-it-does)
+- **Action needed if you already deployed v1.1 or earlier:** redeploy `Logger.cls` and update any call sites to call `flush()` in a `finally` block — buffered entries are no longer auto-persisted on `ERROR`
+
+</details>
+
+<details>
 <summary><strong>v1.1</strong> — Flow fault logging</summary>
 
 - Expanded README section documenting the "Log Message" invocable action's inputs and how to wire it into a Flow's Fault Connector
