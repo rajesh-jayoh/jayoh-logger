@@ -8,7 +8,7 @@
 [![API Version](https://img.shields.io/badge/API-v67.0-0176D3)](sfdx-project.json)
 [![License](https://img.shields.io/badge/License-Unlicense-lightgrey)](#)
 [![Tests](https://img.shields.io/badge/tests-10%20classes-brightgreen)](#tests)
-[![Status](https://img.shields.io/badge/status-v1.0-brightgreen)](#changelog)
+[![Status](https://img.shields.io/badge/status-v1.1-brightgreen)](#changelog)
 
 *Inspired by [Nebula Logger](https://github.com/jongpie/NebulaLogger)'s core idea — reimplemented lean, and platform-event-backed from the ground up.*
 
@@ -148,7 +148,7 @@ One place to maintain across every BMG/Level Data Flow instead of repeating the 
 
 ---
 
-
+## Configuration (all Custom Metadata — no deploy required)
 
 | Custom Metadata Type | Controls |
 |---|---|
@@ -180,13 +180,21 @@ See **[`PACKAGING.md`](PACKAGING.md)** for the full `sf package create` → `ver
 
 ## Changelog
 
+<details open>
+<summary><strong>v1.1</strong> — Flow fault logging</summary>
+
+- Expanded README section documenting the "Log Message" invocable action's inputs and how to wire it into a Flow's Fault Connector
+- Reusable Subflow `Log_Fault_Handler` — connect any element's Fault Connector to it and pass the Flow's name + `{!$Flow.FaultMessage}`
+- *Not covered:* no automated test — Flow behavior isn't exercised by Apex `RunLocalTests`; verify manually against a deliberately-failing element after deploying
+
+</details>
+
 <details>
 <summary><strong>v1.0</strong> — Reports & packaging groundwork</summary>
 
 - Custom report type `Log_And_Log_Entries` joining `Log__c` → `Log_Entry__c`
 - Starter reports: `Recent Errors` (last 7 days), `Errors by Source` (last 30 days, grouped)
 - `PACKAGING.md` with exact unlocked-package CLI commands
-- Reusable Subflow `Log_Fault_Handler` for wiring into any Flow's Fault Connector
 - *Not built as code:* dashboard — build in-org, since it needs a folder ID that only exists post-deploy
 
 </details>
