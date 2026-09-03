@@ -33,8 +33,8 @@ flowchart LR
     G -->|"sync"| H["📧 Email"]
     G -->|"queued callout"| I["💬 Slack"]
 
-    style C fill:#cfe8fc,stroke:#0176D3,stroke-width:2px
-    style G fill:#d9ead3,stroke:#38761d,stroke-width:2px
+    style C fill:#cfe8fc,stroke:#0176D3,stroke-width:2px,color:#1a1a1a
+    style G fill:#d9ead3,stroke:#38761d,stroke-width:2px,color:#1a1a1a
 ```
 
 ---
