@@ -1,14 +1,14 @@
 <div align="center">
 
-# ⚡ JayOh Logger
+# JayOh Logger
 
 **Org-local error logging for Salesforce, built to survive the transaction that broke.**
 
-[![Salesforce](https://img.shields.io/badge/Salesforce-Apex-00A1E0?logo=salesforce&logoColor=white)](https://developer.salesforce.com/)
+[![Salesforce](https://img.shields.io/badge/Salesforce-Apex-00A1E0)](https://developer.salesforce.com/)
 [![API Version](https://img.shields.io/badge/API-v67.0-0176D3)](sfdx-project.json)
 [![License](https://img.shields.io/badge/License-Unlicense-lightgrey)](#)
-[![Tests](https://img.shields.io/badge/tests-10%20classes-brightgreen)](#-tests)
-[![Status](https://img.shields.io/badge/status-v1.0-brightgreen)](#-changelog)
+[![Tests](https://img.shields.io/badge/tests-10%20classes-brightgreen)](#tests)
+[![Status](https://img.shields.io/badge/status-v1.0-brightgreen)](#changelog)
 
 *Inspired by [Nebula Logger](https://github.com/jongpie/NebulaLogger)'s core idea — reimplemented lean, and platform-event-backed from the ground up.*
 
@@ -16,7 +16,7 @@
 
 ---
 
-## 🧠 The core idea
+## The core idea
 
 If a transaction throws and rolls back, any `Log_Entry__c` you inserted earlier in that *same* transaction rolls back with it — you lose the exact error you built this to capture.
 
@@ -30,8 +30,8 @@ flowchart LR
     D --> E[("Log__c\nheader / txn")]
     D --> F[("Log_Entry__c\nchild entries")]
     F -->|"ERROR level"| G["LogAlertService"]
-    G -->|"sync"| H["📧 Email"]
-    G -->|"queued callout"| I["💬 Slack"]
+    G -->|"sync"| H["Email"]
+    G -->|"queued callout"| I["Slack"]
 
     style C fill:#cfe8fc,stroke:#0176D3,stroke-width:2px,color:#1a1a1a
     style G fill:#d9ead3,stroke:#38761d,stroke-width:2px,color:#1a1a1a
@@ -39,24 +39,24 @@ flowchart LR
 
 ---
 
-## ✨ Features
+## Features
 
 | | |
 |---|---|
-| 🪵 **Rollback-safe logging** | Platform-event-backed persistence — `ERROR` entries survive a failed transaction |
-| 🎚️ **Configurable levels** | Per Permission Set / Profile / org default, via Custom Metadata — no deploy to change |
-| 🕵️ **Auto-masking** | Card numbers, SSNs, API keys scrubbed before persist; patterns are editable Custom Metadata |
-| 🧭 **Quiddity capture** | Every entry auto-records execution context (`BATCH_APEX`, `QUEUEABLE`, `AURA`, etc.) |
-| 🔔 **Alerting** | Email + Slack on `ERROR`, toggled per org |
-| 🧹 **Retention + export** | Scheduled purge batch, with an optional CSV email before anything's deleted |
-| 🖥️ **LWC log viewer** | Drop-in component to browse recent logs without leaving the app |
-| 🌐 **Client-side capture** | Global JS error boundary for LWC — uncaught errors stop vanishing into the console |
-| 📊 **Reports** | Custom report type + two starter reports (`Recent Errors`, `Errors by Source`) |
-| 📦 **Flow & LWC entry points** | `@InvocableMethod` and `@AuraEnabled` — not Apex-only |
+| **Rollback-safe logging** | Platform-event-backed persistence — `ERROR` entries survive a failed transaction |
+| **Configurable levels** | Per Permission Set / Profile / org default, via Custom Metadata — no deploy to change |
+| **Auto-masking** | Card numbers, SSNs, API keys scrubbed before persist; patterns are editable Custom Metadata |
+| **Quiddity capture** | Every entry auto-records execution context (`BATCH_APEX`, `QUEUEABLE`, `AURA`, etc.) |
+| **Alerting** | Email + Slack on `ERROR`, toggled per org |
+| **Retention + export** | Scheduled purge batch, with an optional CSV email before anything's deleted |
+| **LWC log viewer** | Drop-in component to browse recent logs without leaving the app |
+| **Client-side capture** | Global JS error boundary for LWC — uncaught errors stop vanishing into the console |
+| **Reports** | Custom report type + two starter reports (`Recent Errors`, `Errors by Source`) |
+| **Flow & LWC entry points** | `@InvocableMethod` and `@AuraEnabled` — not Apex-only |
 
 ---
 
-## 🗂️ What's in the package
+## What's in the package
 
 ```
 force-app/main/default/
@@ -75,7 +75,7 @@ force-app/main/default/
 
 ---
 
-## 🚀 Quick start
+## Quick start
 
 **Deploy to any org:**
 ```bash
@@ -112,7 +112,7 @@ System.schedule('JayOh Log Purge - Weekly', '0 0 2 ? * SUN', new LogPurgeBatch()
 
 ---
 
-## ⚙️ Configuration (all Custom Metadata — no deploy required)
+## Configuration (all Custom Metadata — no deploy required)
 
 | Custom Metadata Type | Controls |
 |---|---|
@@ -122,7 +122,7 @@ System.schedule('JayOh Log Purge - Weekly', '0 0 2 ? * SUN', new LogPurgeBatch()
 
 ---
 
-## 🧪 Tests
+## Tests
 
 10 classes, full coverage of the Apex surface:
 
@@ -136,13 +136,13 @@ sf apex run test --test-level RunLocalTests --result-format human --wait 10 -o <
 
 ---
 
-## 📦 Packaging for multi-org use
+## Packaging for multi-org use
 
 See **[`PACKAGING.md`](PACKAGING.md)** for the full `sf package create` → `version create` → `install` walkthrough. Turning this into a versioned unlocked package means every client org installs from the same source instead of diverging hand-deployed copies.
 
 ---
 
-## 🗺️ Changelog
+## Changelog
 
 <details>
 <summary><strong>v1.0</strong> — Reports & packaging groundwork</summary>
@@ -178,7 +178,7 @@ See **[`PACKAGING.md`](PACKAGING.md)** for the full `sf package create` → `ver
 
 ---
 
-## 🔭 Still open
+## Still open
 
 - Bulk behavior above 200 events in a single publish batch, beyond what's tested
 - No test proving `LogAlertQueueable` behavior on a non-200 Slack response (currently swallowed/logged to debug)
