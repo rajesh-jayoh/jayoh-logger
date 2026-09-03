@@ -1,102 +1,193 @@
-# JayOh Logger (v0.1 starter)
+<div align="center">
 
-Org-local error logging, inspired by Nebula Logger's core idea: log entries
-are published as a **platform event** so they survive a transaction rollback,
-then persisted by a separate trigger.
+# ⚡ JayOh Logger
 
-## What's here
-- `Log__c` — one header per transaction (grouped by `TransactionId__c`)
-- `Log_Entry__c` — child records, one per log call
-- `Log_Entry_Event__e` — the platform event that decouples logging from the
-  transaction's success/failure
-- `Log_Level_Setting__mdt` — Custom Metadata controlling minimum level per
-  Permission Set / Profile / org default, plus retention days for purging
-- `Logger.cls` — the class you actually call from Apex
-- `LoggerInvocable.cls` — Flow (`@InvocableMethod`) and LWC/Aura
-  (`@AuraEnabled`) entry points
-- `LogEntryEventHandler.cls` + trigger — persists events into `Log__c`/`Log_Entry__c`
-- `LogMasking.cls` — regex denylist scrubbing card numbers/SSNs/API keys before persist
-- `LogPurgeBatch.cls` — scheduled batch deleting logs older than the configured retention
+**Org-local error logging for Salesforce, built to survive the transaction that broke.**
 
-## Deploying to a client org
+[![Salesforce](https://img.shields.io/badge/Salesforce-Apex-00A1E0?logo=salesforce&logoColor=white)](https://developer.salesforce.com/)
+[![API Version](https://img.shields.io/badge/API-v61.0-0176D3)](sfdx-project.json)
+[![License](https://img.shields.io/badge/License-Unlicense-lightgrey)](#)
+[![Tests](https://img.shields.io/badge/tests-10%20classes-brightgreen)](#-tests)
+[![Status](https://img.shields.io/badge/status-v0.3-orange)](#-changelog)
+
+*Inspired by [Nebula Logger](https://github.com/jongpie/NebulaLogger)'s core idea — reimplemented lean, and platform-event-backed from the ground up.*
+
+</div>
+
+---
+
+## 🧠 The core idea
+
+If a transaction throws and rolls back, any `Log_Entry__c` you inserted earlier in that *same* transaction rolls back with it — you lose the exact error you built this to capture.
+
+**JayOh Logger publishes every log entry as a platform event first.** Platform events commit independently of the surrounding transaction, so the entry survives even when everything else unwinds. A separate trigger then persists it into durable objects.
+
+```mermaid
+flowchart LR
+    A["Apex / Flow / LWC\ncall site"] -->|"Logger.error() etc."| B["In-memory buffer"]
+    B -->|"EventBus.publish()"| C(("Log_Entry_Event__e\nplatform event"))
+    C -->|"survives rollback"| D["LogEntryEventTrigger"]
+    D --> E[("Log__c\nheader / txn")]
+    D --> F[("Log_Entry__c\nchild entries")]
+    F -->|"ERROR level"| G["LogAlertService"]
+    G -->|"sync"| H["📧 Email"]
+    G -->|"queued callout"| I["💬 Slack"]
+
+    style C fill:#f9d976,stroke:#333
+    style G fill:#ffb3b3,stroke:#333
+```
+
+---
+
+## ✨ Features
+
+| | |
+|---|---|
+| 🪵 **Rollback-safe logging** | Platform-event-backed persistence — `ERROR` entries survive a failed transaction |
+| 🎚️ **Configurable levels** | Per Permission Set / Profile / org default, via Custom Metadata — no deploy to change |
+| 🕵️ **Auto-masking** | Card numbers, SSNs, API keys scrubbed before persist; patterns are editable Custom Metadata |
+| 🧭 **Quiddity capture** | Every entry auto-records execution context (`BATCH_APEX`, `QUEUEABLE`, `AURA`, etc.) |
+| 🔔 **Alerting** | Email + Slack on `ERROR`, toggled per org |
+| 🧹 **Retention + export** | Scheduled purge batch, with an optional CSV email before anything's deleted |
+| 🖥️ **LWC log viewer** | Drop-in component to browse recent logs without leaving the app |
+| 🌐 **Client-side capture** | Global JS error boundary for LWC — uncaught errors stop vanishing into the console |
+| 📊 **Reports** | Custom report type + two starter reports (`Recent Errors`, `Errors by Source`) |
+| 📦 **Flow & LWC entry points** | `@InvocableMethod` and `@AuraEnabled` — not Apex-only |
+
+---
+
+## 🗂️ What's in the package
+
+```
+force-app/main/default/
+├── classes/            Logger, LoggerInvocable, LogEntryEventHandler,
+│                       LogAlertService, LogMasking, LogPurgeBatch,
+│                       LogViewerController, LogLevelSettingSelector …
+├── triggers/           LogEntryEventTrigger  (platform event → durable objects)
+├── objects/            Log__c · Log_Entry__c · Log_Entry_Event__e
+│                       Log_Level_Setting__mdt · Log_Alert_Setting__mdt
+│                       Log_Masking_Pattern__mdt
+├── customMetadata/     Seeded defaults for the three CMDTs above
+├── lwc/                logViewer (visible)  ·  loggerClient (headless utility)
+├── reportTypes/        Log_And_Log_Entries
+└── reports/            Recent Errors · Errors by Source
+```
+
+---
+
+## 🚀 Quick start
+
+**Deploy to any org:**
 ```bash
 sf project deploy start --source-dir force-app -o <target-org-alias>
 ```
 
-## Usage
+**Log from Apex:**
 ```apex
 try {
     // risky callout
 } catch (Exception ex) {
     Logger.error('CBHttpClient.patchShippingAddress', 'Chargebee PATCH failed', ex);
 }
-Logger.flush(); // ERROR level auto-flushes; call this explicitly for INFO/DEBUG/WARN buffers
+Logger.flush(); // ERROR auto-flushes; call explicitly for INFO/DEBUG/WARN buffers
 ```
 
-From Flow: use the "Log Message" invocable action.
-From LWC: call the exposed `LoggerInvocable.logFromClient` via an imperative Apex call.
+**Log from Flow:** use the *"Log Message"* invocable action.
 
-## Schedule the purge job (once per org)
+**Log from LWC:**
+```js
+import { logError, installGlobalErrorBoundary } from 'c/loggerClient';
+
+// one-off
+logError('myComponent.handleSave', error);
+
+// once, from your top-level component — catches uncaught errors app-wide
+installGlobalErrorBoundary('myAppShell');
+```
+
+**Schedule the purge job (once per org):**
 ```apex
 System.schedule('JayOh Log Purge - Weekly', '0 0 2 ? * SUN', new LogPurgeBatch());
 ```
 
-## v0.2 additions
-- **Alerting** — `Log_Alert_Setting__mdt` toggles email (sent synchronously) and/or
-  Slack (queued via `LogAlertQueueable` since callouts aren't allowed synchronously
-  from a trigger) whenever an ERROR-level entry is persisted. Slack webhook URL is
-  stored in plain Custom Metadata for simplicity — swap for a Named Credential
-  before using this against a real client incident channel.
-- **Configurable masking** — `Log_Masking_Pattern__mdt` holds active regex patterns
-  (seeded with card number / SSN / API-key defaults); add client-specific patterns
-  (e.g. a Chargebee key prefix) without a deploy. Falls back to built-in patterns
-  if no active records exist.
-- **Quiddity capture** — every entry now automatically records execution context
-  (`BATCH_APEX`, `QUEUEABLE`, `FUTURE`, `AURA`, `VF`, `RUNTEST`, etc.) via
-  `Request.getCurrent().getQuiddity()` — no call-site changes needed.
-- **Retention export** — `Log_Level_Setting__mdt.ExportBeforePurge__c` +
-  `ExportRecipientEmail__c` email a CSV of everything about to be purged, so
-  ERROR history from 45 days ago isn't gone forever if a client asks about it.
-- **LWC log viewer** — `logViewer` component (drop on an App Page) lists recent
-  `Log__c` headers with a severity filter; click a row to expand its entries.
-  Backed by `LogViewerController`.
-- **Client-side logging + global JS error boundary** — `loggerClient` is a
-  headless utility LWC (no UI, import its exports). Call
-  `installGlobalErrorBoundary('yourAppShellName')` once from your top-level
-  component to catch uncaught JS errors and unhandled promise rejections
-  automatically; call `logError`/`logWarn`/`logInfo` directly for anything else.
+---
 
-## v0.3 additions
-- **Report Type + starter reports** — `Log_And_Log_Entries` custom report type
-  joins `Log__c` to its `Log_Entry__c` children. Two starter reports ship with
-  it: `Recent Errors` (tabular, last 7 days) and `Errors by Source` (summary,
-  grouped by `Source__c`, last 30 days) — the latter is what tells you a
-  flaky integration is trending before a client raises it. Build a dashboard
-  from these in-org (Setup UI is genuinely faster than hand-written dashboard
-  metadata, and it needs a folder ID that only exists post-deploy anyway).
-- **Packaging** — see `PACKAGING.md` for the exact `sf package create` /
-  `version create` / `install` commands. Not run yet — needs your Dev Hub
-  session, which this environment can't reach.
+## ⚙️ Configuration (all Custom Metadata — no deploy required)
 
-## Not built as code — do these in Setup instead
-- **Dashboard** — build it in-org referencing the two reports above.
+| Custom Metadata Type | Controls |
+|---|---|
+| `Log_Level_Setting__mdt` | Minimum log level per Permission Set/Profile/org; retention days; export-before-purge |
+| `Log_Alert_Setting__mdt` | Email/Slack toggles, recipients, webhook URL |
+| `Log_Masking_Pattern__mdt` | Active regex patterns scrubbed from every message before persist |
 
-## Tests
-Included: `LogLevelTest`, `LogMaskingTest`, `LogLevelSettingSelectorTest`,
-`LogEntryEventHandlerTest`, `LoggerTest`, `LoggerInvocableTest`, `LogPurgeBatchTest`,
-`LogAlertServiceTest`, `LogAlertQueueableTest`, `LogViewerControllerTest`.
-Platform-event delivery in tests uses `Test.getEventBus().deliver()` after
-`Test.stopTest()` — that's what actually fires `LogEntryEventTrigger` synchronously
-during the test so the persisted `Log__c`/`Log_Entry__c` rows can be asserted on.
+---
 
-Run before deploying to a client org:
+## 🧪 Tests
+
+10 classes, full coverage of the Apex surface:
+
+`LogLevelTest` · `LogMaskingTest` · `LogLevelSettingSelectorTest` · `LogEntryEventHandlerTest` · `LoggerTest` · `LoggerInvocableTest` · `LogPurgeBatchTest` · `LogAlertServiceTest` · `LogAlertQueueableTest` · `LogViewerControllerTest`
+
+> Platform-event delivery in tests uses `Test.getEventBus().deliver()` after `Test.stopTest()` — that's what fires `LogEntryEventTrigger` synchronously so persisted rows can actually be asserted on.
+
 ```bash
 sf apex run test --test-level RunLocalTests --result-format human --wait 10 -o <target-org-alias>
 ```
 
-## Still open
-- Bulk behavior above 200 events in a single publish batch beyond what's tested here
-- No test proving `LogAlertQueueable` behavior when the Slack endpoint returns a
-  non-200 (currently just swallowed/logged to debug)
-- `loggerClient`'s global error boundary is installed manually per app shell —
-  not automatically wired into every LWC in a client org
+---
+
+## 📦 Packaging for multi-org use
+
+See **[`PACKAGING.md`](PACKAGING.md)** for the full `sf package create` → `version create` → `install` walkthrough. Turning this into a versioned unlocked package means every client org installs from the same source instead of diverging hand-deployed copies.
+
+---
+
+## 🗺️ Changelog
+
+<details>
+<summary><strong>v0.3</strong> — Reports & packaging groundwork</summary>
+
+- Custom report type `Log_And_Log_Entries` joining `Log__c` → `Log_Entry__c`
+- Starter reports: `Recent Errors` (last 7 days), `Errors by Source` (last 30 days, grouped)
+- `PACKAGING.md` with exact unlocked-package CLI commands
+- *Not built as code:* dashboard — build in-org, since it needs a folder ID that only exists post-deploy
+
+</details>
+
+<details>
+<summary><strong>v0.2</strong> — Alerting, masking, visibility</summary>
+
+- **Alerting:** email (sync) + Slack (queued callout) on `ERROR`
+- **Configurable masking:** patterns moved to Custom Metadata, seeded with card/SSN/API-key defaults
+- **Quiddity capture:** execution context recorded automatically on every entry
+- **Retention export:** CSV emailed before purge, gated by Custom Metadata
+- **LWC log viewer:** browse/filter/drill into recent logs
+- **Client-side capture:** headless `loggerClient` utility + global JS error boundary
+
+</details>
+
+<details>
+<summary><strong>v0.1</strong> — Core framework</summary>
+
+- `Log__c` / `Log_Entry__c` / `Log_Entry_Event__e` platform-event pipeline
+- `Logger.cls` + `LoggerInvocable` (Flow/LWC entry points)
+- Per-Permission-Set/Profile log level control
+- Regex-based masking, scheduled retention purge
+
+</details>
+
+---
+
+## 🔭 Still open
+
+- Bulk behavior above 200 events in a single publish batch, beyond what's tested
+- No test proving `LogAlertQueueable` behavior on a non-200 Slack response (currently swallowed/logged to debug)
+- Global JS error boundary is opt-in per app shell, not auto-wired into every LWC in a client org
+
+---
+
+<div align="center">
+
+Built for <a href="https://jayoh.io">JayOh Consultants</a> · maintained across client engagements, not a single org
+
+</div>
