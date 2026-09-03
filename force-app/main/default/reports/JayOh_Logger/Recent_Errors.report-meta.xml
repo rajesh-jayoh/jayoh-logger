@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Report xmlns="http://soap.sforce.com/2006/04/metadata">
+    <name>Recent Errors</name>
+    <description>JayOh Logger: ERROR-level log entries from the last 7 days, most recent first.</description>
+    <reportType>Log_And_Log_Entries</reportType>
+    <format>Tabular</format>
+    <showDetails>true</showDetails>
+    <columns>
+        <field>Log__c.CREATED_DATE</field>
+    </columns>
+    <columns>
+        <field>Log__c.TransactionId__c</field>
+    </columns>
+    <columns>
+        <field>Log__c.Log_Entries__r.Source__c</field>
+    </columns>
+    <columns>
+        <field>Log__c.Log_Entries__r.Message__c</field>
+    </columns>
+    <columns>
+        <field>Log__c.Log_Entries__r.ExceptionType__c</field>
+    </columns>
+    <columns>
+        <field>Log__c.Log_Entries__r.OccurredAt__c</field>
+    </columns>
+    <filter>
+        <criteriaItems>
+            <column>Log__c.Log_Entries__r.Level__c</column>
+            <operator>equals</operator>
+            <value>ERROR</value>
+        </criteriaItems>
+        <criteriaItems>
+            <column>Log__c.CREATED_DATE</column>
+            <operator>equals</operator>
+            <value>LAST_N_DAYS:7</value>
+        </criteriaItems>
+        <language>en_US</language>
+    </filter>
+    <sortColumn>Log__c.CREATED_DATE</sortColumn>
+    <sortOrder>Desc</sortOrder>
+</Report>

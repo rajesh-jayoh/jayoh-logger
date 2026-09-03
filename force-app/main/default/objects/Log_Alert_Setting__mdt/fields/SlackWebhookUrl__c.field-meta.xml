@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>SlackWebhookUrl__c</fullName>
+    <label>Slack Webhook URL</label>
+    <type>Text</type>
+    <length>255</length>
+    <description>Starter-simple: raw webhook URL in Custom Metadata. For production, swap this for a Named Credential so the URL isn't visible to anyone who can view Custom Metadata (which is broader than who can view Named Credentials).</description>
+</CustomField>

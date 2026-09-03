@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomMetadata xmlns="http://soap.sforce.com/2006/04/metadata" label="Card_Number">
+    <protected>false</protected>
+    <values><field>RegexPattern__c</field><value xsi:type="xsd:string">\b(?:\d[ -]*?){13,16}\b</value></values>
+    <values><field>Active__c</field><value xsi:type="xsd:boolean">true</value></values>
+</CustomMetadata>

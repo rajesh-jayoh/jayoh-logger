@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Quiddity__c</fullName>
+    <label>Quiddity</label>
+    <type>Text</type>
+    <length>40</length>
+    <description>Execution context captured automatically via Request.getCurrent().getQuiddity() — e.g. BATCH_APEX, QUEUEABLE, FUTURE, VF, AURA, RUNTEST.</description>
+</CustomField>

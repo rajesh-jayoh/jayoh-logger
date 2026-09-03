@@ -1,0 +1,17 @@
+.logrow {
+    cursor: pointer;
+}
+.logrow:hover {
+    background-color: #f3f3f3;
+}
+.sev-error {
+    color: #c23934;
+    font-weight: bold;
+}
+.sev-warn {
+    color: #b57c00;
+    font-weight: bold;
+}
+.sev-info {
+    color: #444;
+}

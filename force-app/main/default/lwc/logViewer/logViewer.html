@@ -1,0 +1,60 @@
+<template>
+    <lightning-card title="JayOh Logger — Recent Logs" icon-name="standard:log_a_call">
+        <div slot="actions">
+            <lightning-combobox
+                name="levelFilter"
+                label="Level"
+                variant="label-hidden"
+                value={levelFilter}
+                options={levelOptions}
+                onchange={handleLevelChange}>
+            </lightning-combobox>
+        </div>
+
+        <template if:true={isLoading}>
+            <lightning-spinner alternative-text="Loading" size="small"></lightning-spinner>
+        </template>
+
+        <template if:false={isLoading}>
+            <template if:true={hasLogs}>
+                <table class="slds-table slds-table_bordered slds-table_cell-buffer">
+                    <thead>
+                        <tr class="slds-line-height_reset">
+                            <th scope="col">Transaction</th>
+                            <th scope="col">Severity</th>
+                            <th scope="col">Entries</th>
+                            <th scope="col">Created</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template for:each={logs} for:item="log">
+                            <tr key={log.id} onclick={handleRowClick} data-id={log.id} class="slds-hint-parent logrow">
+                                <td>{log.transactionId}</td>
+                                <td><span class={log.severityClass}>{log.highestSeverity}</span></td>
+                                <td>{log.entryCount}</td>
+                                <td>{log.formattedDate}</td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </template>
+            <template if:false={hasLogs}>
+                <p class="slds-p-around_medium slds-text-color_weak">No logs found for this filter.</p>
+            </template>
+        </template>
+    </lightning-card>
+
+    <template if:true={selectedLogId}>
+        <lightning-card title="Entries" icon-name="standard:log_a_call" class="slds-m-top_small">
+            <template for:each={entries} for:item="entry">
+                <div key={entry.key} class="slds-p-around_small slds-border_bottom">
+                    <p><strong>{entry.level}</strong> — {entry.source} ({entry.occurredAt})</p>
+                    <p>{entry.message}</p>
+                    <template if:true={entry.exceptionType}>
+                        <p class="slds-text-color_error">{entry.exceptionType}: {entry.exceptionMessage}</p>
+                    </template>
+                </div>
+            </template>
+        </lightning-card>
+    </template>
+</template>
