@@ -5,7 +5,7 @@
 **Org-local error logging for Salesforce, built to survive the transaction that broke.**
 
 [![Salesforce](https://img.shields.io/badge/Salesforce-Apex-00A1E0?logo=salesforce&logoColor=white)](https://developer.salesforce.com/)
-[![API Version](https://img.shields.io/badge/API-v61.0-0176D3)](sfdx-project.json)
+[![API Version](https://img.shields.io/badge/API-v67.0-0176D3)](sfdx-project.json)
 [![License](https://img.shields.io/badge/License-Unlicense-lightgrey)](#)
 [![Tests](https://img.shields.io/badge/tests-10%20classes-brightgreen)](#-tests)
 [![Status](https://img.shields.io/badge/status-v0.3-orange)](#-changelog)
