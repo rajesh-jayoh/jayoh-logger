@@ -67,6 +67,102 @@ private class LogEntryEventHandlerTest {
     }
 
     @isTest
+    static void testParentLogTransactionIdResolvesToParentLookupWhenParentAlreadyPersisted() {
+        // Persist the "parent" transaction's header first.
+        LogEntryEventHandler.handle(new List<Log_Entry_Event__e>{
+            new Log_Entry_Event__e(
+                TransactionId__c = 'PARENT-TXN',
+                Level__c = 'INFO',
+                Source__c = 'parent',
+                Message__c = 'parent started',
+                OccurredAt__c = System.now(),
+                RunningUser__c = UserInfo.getUserId()
+            )
+        });
+
+        // Now a "child" transaction (as if from a batch job's execute()) that
+        // points back to it via ParentLogTransactionId__c.
+        LogEntryEventHandler.handle(new List<Log_Entry_Event__e>{
+            new Log_Entry_Event__e(
+                TransactionId__c = 'CHILD-TXN',
+                ParentLogTransactionId__c = 'PARENT-TXN',
+                Level__c = 'INFO',
+                Source__c = 'child',
+                Message__c = 'processed a batch scope',
+                OccurredAt__c = System.now(),
+                RunningUser__c = UserInfo.getUserId()
+            )
+        });
+
+        Log__c parentLog = [SELECT Id FROM Log__c WHERE TransactionId__c = 'PARENT-TXN'];
+        Log__c childLog = [SELECT Id, ParentLog__c FROM Log__c WHERE TransactionId__c = 'CHILD-TXN'];
+
+        System.assertEquals(parentLog.Id, childLog.ParentLog__c, 'Child header should be linked to the already-persisted parent header');
+    }
+
+    @isTest
+    static void testParentLogTransactionIdLeavesBlankWhenParentNotYetPersisted() {
+        // No 'PARENT-NOT-YET' header exists — resolution should silently
+        // leave ParentLog__c blank rather than failing the whole save.
+        LogEntryEventHandler.handle(new List<Log_Entry_Event__e>{
+            new Log_Entry_Event__e(
+                TransactionId__c = 'ORPHAN-CHILD-TXN',
+                ParentLogTransactionId__c = 'PARENT-NOT-YET',
+                Level__c = 'INFO',
+                Source__c = 'child',
+                Message__c = 'processed before parent saved',
+                OccurredAt__c = System.now(),
+                RunningUser__c = UserInfo.getUserId()
+            )
+        });
+
+        Log__c childLog = [SELECT ParentLog__c FROM Log__c WHERE TransactionId__c = 'ORPHAN-CHILD-TXN'];
+        System.assertEquals(null, childLog.ParentLog__c);
+    }
+
+    @isTest
+    static void testTagsAreNormalizedIntoLogTagAndJunctionRecords() {
+        LogEntryEventHandler.handle(new List<Log_Entry_Event__e>{
+            new Log_Entry_Event__e(
+                TransactionId__c = 'TAG-TXN',
+                Level__c = 'ERROR',
+                Source__c = 'CBHttpClient.patch',
+                Message__c = 'failed',
+                Tags__c = 'chargebee;shipping-address',
+                OccurredAt__c = System.now(),
+                RunningUser__c = UserInfo.getUserId()
+            )
+        });
+
+        List<Log_Tag__c> tags = [SELECT Name FROM Log_Tag__c WHERE Name IN ('chargebee', 'shipping-address')];
+        System.assertEquals(2, tags.size());
+
+        Log_Entry__c entry = [SELECT Id FROM Log_Entry__c WHERE Source__c = 'CBHttpClient.patch'];
+        List<Log_Entry_Tag__c> junctions = [SELECT Log_Tag__r.Name FROM Log_Entry_Tag__c WHERE Log_Entry__c = :entry.Id];
+        System.assertEquals(2, junctions.size());
+    }
+
+    @isTest
+    static void testDuplicateTagNameAcrossEntriesReusesSameLogTagRecord() {
+        LogEntryEventHandler.handle(new List<Log_Entry_Event__e>{
+            new Log_Entry_Event__e(
+                TransactionId__c = 'TAG-REUSE-TXN', Level__c = 'ERROR', Source__c = 'a',
+                Message__c = 'first', Tags__c = 'chargebee', OccurredAt__c = System.now(), RunningUser__c = UserInfo.getUserId()
+            ),
+            new Log_Entry_Event__e(
+                TransactionId__c = 'TAG-REUSE-TXN', Level__c = 'ERROR', Source__c = 'b',
+                Message__c = 'second', Tags__c = 'chargebee', OccurredAt__c = System.now(), RunningUser__c = UserInfo.getUserId()
+            )
+        });
+
+        List<Log_Tag__c> tags = [SELECT Id FROM Log_Tag__c WHERE Name = 'chargebee'];
+        System.assertEquals(1, tags.size(), 'The same tag name used across multiple entries should reuse one Log_Tag__c record');
+
+        List<Log_Entry_Tag__c> junctions = [SELECT Id FROM Log_Entry_Tag__c WHERE Log_Tag__c = :tags[0].Id];
+        System.assertEquals(2, junctions.size(), 'Both entries should have their own junction row pointing at the shared tag');
+    }
+
+    @isTest
     static void testBulkHandlesTwoHundredEventsAcrossManyTransactions() {
         List<Log_Entry_Event__e> events = new List<Log_Entry_Event__e>();
         for (Integer i = 0; i < 200; i++) {

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Log_Entry__c</fullName>
+    <label>Log Entry</label>
+    <type>MasterDetail</type>
+    <referenceTo>Log_Entry__c</referenceTo>
+    <relationshipName>Log_Entry_Tags</relationshipName>
+    <relationshipLabel>Log Entry Tags</relationshipLabel>
+    <required>true</required>
+</CustomField>

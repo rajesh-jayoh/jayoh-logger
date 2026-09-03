@@ -1,6 +1,8 @@
 /**
  * Persists Log_Entry_Event__e platform events into durable Log__c (header,
- * one per transaction id) and Log_Entry__c (child, one per log call).
+ * one per transaction id), Log_Entry__c (child, one per log call), and
+ * Log_Tag__c/Log_Entry_Tag__c (normalized tags, if any were set via
+ * LogEntryBuilder.addTag()/addTags()).
  *
  * Idempotency: upserts Log__c on TransactionId__c (external-id-style unique
  * field) so multiple flushes within the same transaction, or the same
@@ -14,6 +16,7 @@ public without sharing class LogEntryEventHandler {
         }
 
         Map<String, Log__c> headersByTxnId = new Map<String, Log__c>();
+        Map<String, String> parentTxnIdByTxnId = new Map<String, String>();
         for (Log_Entry_Event__e e : events) {
             if (!headersByTxnId.containsKey(e.TransactionId__c)) {
                 headersByTxnId.put(e.TransactionId__c, new Log__c(
@@ -25,6 +28,9 @@ public without sharing class LogEntryEventHandler {
                 if (LogLevel.ordinalOf(e.Level__c) > LogLevel.ordinalOf(existing.HighestSeverity__c)) {
                     existing.HighestSeverity__c = e.Level__c;
                 }
+            }
+            if (String.isNotBlank(e.ParentLogTransactionId__c)) {
+                parentTxnIdByTxnId.put(e.TransactionId__c, e.ParentLogTransactionId__c);
             }
         }
 
@@ -49,6 +55,25 @@ public without sharing class LogEntryEventHandler {
             }
         }
 
+        // Resolve parent Log__c lookups where a matching parent transaction has
+        // already been persisted. If the parent hasn't been saved yet (e.g. it's
+        // still buffered, unflushed, in the calling transaction), this silently
+        // leaves ParentLog__c blank rather than failing the whole save.
+        if (!parentTxnIdByTxnId.isEmpty()) {
+            Map<String, Id> parentHeaderIdByTxnId = new Map<String, Id>();
+            for (Log__c parentLog : [
+                SELECT Id, TransactionId__c FROM Log__c WHERE TransactionId__c IN :parentTxnIdByTxnId.values()
+            ]) {
+                parentHeaderIdByTxnId.put(parentLog.TransactionId__c, parentLog.Id);
+            }
+            for (String txnId : parentTxnIdByTxnId.keySet()) {
+                Id parentId = parentHeaderIdByTxnId.get(parentTxnIdByTxnId.get(txnId));
+                if (parentId != null) {
+                    headersByTxnId.get(txnId).ParentLog__c = parentId;
+                }
+            }
+        }
+
         upsert headersByTxnId.values() TransactionId__c;
 
         // Re-map by id now that headers are saved
@@ -70,10 +95,13 @@ public without sharing class LogEntryEventHandler {
                 RelatedRecordId__c   = e.RelatedRecordId__c,
                 OccurredAt__c        = e.OccurredAt__c,
                 RunningUser__c       = e.RunningUser__c,
-                Quiddity__c          = e.Quiddity__c
+                Quiddity__c          = e.Quiddity__c,
+                Tags__c              = e.Tags__c
             ));
         }
         insert entries;
+
+        persistTags(entries);
 
         List<Log_Entry__c> errorEntries = new List<Log_Entry__c>();
         for (Log_Entry__c e : entries) {
@@ -83,6 +111,68 @@ public without sharing class LogEntryEventHandler {
         }
         if (!errorEntries.isEmpty()) {
             LogAlertService.notifyOnErrors(errorEntries);
+        }
+    }
+
+    /**
+     * Splits each entry's semicolon-separated Tags__c into normalized
+     * Log_Tag__c records (deduped by Name, reused across entries) and
+     * Log_Entry_Tag__c junction rows.
+     */
+    private static void persistTags(List<Log_Entry__c> entries) {
+        Set<String> allTagNames = new Set<String>();
+        Map<Id, List<String>> tagNamesByEntryId = new Map<Id, List<String>>();
+
+        for (Log_Entry__c entry : entries) {
+            if (String.isBlank(entry.Tags__c)) {
+                continue;
+            }
+            List<String> tagNames = new List<String>();
+            for (String rawTag : entry.Tags__c.split(';')) {
+                String tagName = rawTag.trim();
+                if (String.isNotBlank(tagName)) {
+                    tagNames.add(tagName);
+                    allTagNames.add(tagName);
+                }
+            }
+            if (!tagNames.isEmpty()) {
+                tagNamesByEntryId.put(entry.Id, tagNames);
+            }
+        }
+
+        if (allTagNames.isEmpty()) {
+            return;
+        }
+
+        Map<String, Log_Tag__c> tagsByName = new Map<String, Log_Tag__c>();
+        for (Log_Tag__c existingTag : [SELECT Id, Name FROM Log_Tag__c WHERE Name IN :allTagNames]) {
+            tagsByName.put(existingTag.Name, existingTag);
+        }
+
+        List<Log_Tag__c> newTags = new List<Log_Tag__c>();
+        for (String tagName : allTagNames) {
+            if (!tagsByName.containsKey(tagName)) {
+                newTags.add(new Log_Tag__c(Name = tagName));
+            }
+        }
+        if (!newTags.isEmpty()) {
+            insert newTags;
+            for (Log_Tag__c newTag : newTags) {
+                tagsByName.put(newTag.Name, newTag);
+            }
+        }
+
+        List<Log_Entry_Tag__c> junctions = new List<Log_Entry_Tag__c>();
+        for (Id entryId : tagNamesByEntryId.keySet()) {
+            for (String tagName : tagNamesByEntryId.get(entryId)) {
+                junctions.add(new Log_Entry_Tag__c(
+                    Log_Entry__c = entryId,
+                    Log_Tag__c = tagsByName.get(tagName).Id
+                ));
+            }
+        }
+        if (!junctions.isEmpty()) {
+            insert junctions;
         }
     }
 }

@@ -7,10 +7,10 @@
 [![Salesforce](https://img.shields.io/badge/Salesforce-Apex-00A1E0)](https://developer.salesforce.com/)
 [![API Version](https://img.shields.io/badge/API-v67.0-0176D3)](sfdx-project.json)
 [![License](https://img.shields.io/badge/License-Unlicense-lightgrey)](#)
-[![Tests](https://img.shields.io/badge/tests-10%20classes-brightgreen)](#tests)
-[![Status](https://img.shields.io/badge/status-v1.2-brightgreen)](#changelog)
+[![Tests](https://img.shields.io/badge/tests-13%20classes-brightgreen)](#tests)
+[![Status](https://img.shields.io/badge/status-v1.3-brightgreen)](#changelog)
 
-*Inspired by [Nebula Logger](https://github.com/jongpie/NebulaLogger)'s core idea — reimplemented lean, and platform-event-backed from the ground up.*
+*A native, platform-event-backed logging framework — built for reuse across every client org.*
 
 </div>
 
@@ -44,6 +44,11 @@ flowchart LR
 | | |
 |---|---|
 | **Rollback-safe logging** | Platform-event-backed persistence — `ERROR` entries survive a failed transaction |
+| **Four save methods** | `EVENT_BUS` (default), `QUEUEABLE`, `REST`, `SYNCHRONOUS_DML` — pick the right limit/rollback trade-off per call |
+| **Fluent builder API** | Chain `.setRecord()`, `.addTag()`, `.setExceptionDetails()` off any log call |
+| **Tagging** | Normalized `Log_Tag__c`/`Log_Entry_Tag__c` — dedupe automatically, queryable and reportable |
+| **Parent/child transaction correlation** | Thread a batch/queueable job's separate transactions back to the log that kicked it off |
+| **Lazy-formatted messages** | `LogMessage` skips `String.format()` entirely when the entry's level is filtered out |
 | **Configurable levels** | Per Permission Set / Profile / org default, via Custom Metadata — no deploy to change |
 | **Auto-masking** | Card numbers, SSNs, API keys scrubbed before persist; patterns are editable Custom Metadata |
 | **Quiddity capture** | Every entry auto-records execution context (`BATCH_APEX`, `QUEUEABLE`, `AURA`, etc.) |
@@ -60,11 +65,13 @@ flowchart LR
 
 ```
 force-app/main/default/
-├── classes/            Logger, LoggerInvocable, LogEntryEventHandler,
+├── classes/            Logger, LogEntryBuilder, LogMessage, LoggerInvocable,
+│                       LogEntryEventHandler, LogSaveQueueable, LogRestSaver,
 │                       LogAlertService, LogMasking, LogPurgeBatch,
 │                       LogViewerController, LogLevelSettingSelector …
 ├── triggers/           LogEntryEventTrigger  (platform event → durable objects)
 ├── objects/            Log__c · Log_Entry__c · Log_Entry_Event__e
+│                       Log_Tag__c · Log_Entry_Tag__c
 │                       Log_Level_Setting__mdt · Log_Alert_Setting__mdt
 │                       Log_Masking_Pattern__mdt
 ├── customMetadata/     Seeded defaults for the three CMDTs above
@@ -88,9 +95,34 @@ sf project deploy start --source-dir force-app -o <target-org-alias>
 try {
     // risky callout
 } catch (Exception ex) {
-    Logger.error('CBHttpClient.patchShippingAddress', 'Chargebee PATCH failed', ex);
+    Logger.error('CBHttpClient.patchShippingAddress', 'Chargebee PATCH failed', ex)
+        .setRecord(quote.Id)
+        .addTag('chargebee')
+        .addTag('shipping-address');
 } finally {
-    Logger.flush(); // see "Governor limits" below for why this must be exactly one call, not one per error
+    Logger.saveLog(); // see "Governor limits" below for why this must be exactly one call, not one per error
+}
+```
+
+**Correlate a batch/queueable job's transactions:**
+```apex
+public class MyBatchJob implements Database.Batchable<SObject> {
+    private String originalTransactionId;
+
+    public Database.QueryLocator start(Database.BatchableContext bc) {
+        this.originalTransactionId = Logger.getTransactionId();
+        Logger.info('MyBatchJob.start', 'Starting job');
+        Logger.saveLog();
+        return Database.getQueryLocator([SELECT Id FROM Account]);
+    }
+
+    public void execute(Database.BatchableContext bc, List<Account> scope) {
+        Logger.setParentLogTransactionId(this.originalTransactionId); // links this execute()'s own transaction back to start()'s
+        Logger.info('MyBatchJob.execute', 'Processed a scope');
+        Logger.saveLog();
+    }
+
+    public void finish(Database.BatchableContext bc) {}
 }
 ```
 
@@ -137,7 +169,7 @@ Flow doesn't log unhandled errors anywhere durable by default — a fault just s
 - `source`: the Flow's name (hardcode it — `$Flow.CurrentFlow` variables aren't reliably available in every context)
 - `message`: `{!$Flow.FaultMessage}`
 
-Because this goes through the same platform-event pipeline as everything else, a Flow fault logged this way survives even though the Flow's own DML rolled back — same guarantee Apex gets. This is the closest equivalent to Nebula Logger's Flow fault-handling plugin, without needing a separate subflow per Flow.
+Because this goes through the same platform-event pipeline as everything else, a Flow fault logged this way survives even though the Flow's own DML rolled back — same guarantee Apex gets.
 
 **Recommended pattern:** a ready-made reusable Subflow ships with this package — `flows/Log_Fault_Handler.flow-meta.xml`. Connect any element's Fault Connector to it and pass:
 
@@ -149,24 +181,54 @@ One place to maintain across every BMG/Level Data Flow instead of repeating the 
 
 ---
 
-## Governor limits (why flush() works the way it does)
+## Governor limits (why saveLog()/flush() work the way they do)
 
 `EventBus.publish()` is capped at **150 calls per transaction** — a hard Apex governor limit. Critically, a single `EventBus.publish(list)` call counts as **one** call no matter how many events are in the list, the same way `Database.insert(list)` counts as one DML statement regardless of list size.
 
-**`Logger` buffers every entry in memory and only publishes on `flush()`** — mirroring [Nebula Logger](https://github.com/jongpie/NebulaLogger)'s model. An earlier version of this class auto-flushed on every `ERROR` call individually; that meant a loop catching 200 errors made 200 separate `publish()` calls and risked the 150-per-transaction ceiling. Buffering avoids that entirely.
+**`Logger` buffers every entry in memory and only saves on `saveLog()`/`flush()`.** An earlier version of this class auto-flushed on every `ERROR` call individually; that meant a loop catching 200 errors made 200 separate `publish()` calls and risked the 150-per-transaction ceiling. Buffering avoids that entirely.
 
-The trade-off: **you must call `Logger.flush()` yourself** — ideally in a `finally` block, so it still runs even when an exception propagates past your `catch`. A buffered entry that never reaches `flush()` is silently lost.
+The trade-off: **you must call `saveLog()`/`flush()` yourself** — ideally in a `finally` block, so it still runs even when an exception propagates past your `catch`. A buffered entry that never reaches it is silently lost.
 
-Additional controls (same names as Nebula Logger's, for anyone already familiar with it):
+**Four save methods** (`Logger.saveLog(Logger.SaveMethod method)`), each trading rollback-safety for a different limit profile:
+
+| Method | Behavior | Trade-off |
+|---|---|---|
+| `EVENT_BUS` (default) | Publishes as a platform event | Survives a transaction rollback; counts against the 150-calls-per-transaction and org-wide daily/hourly publish limits |
+| `QUEUEABLE` | Defers the insert to a separate async job | That job gets its own independent governor limits — but log entries no longer survive a rollback the same way, since they're queued as a job, not published as an event |
+| `REST` | Synchronous callout to this org's own REST API using the current session | Avoids a local DML statement entirely — useful when DML isn't safe/available in the current context. **Experimental** — see `LogRestSaver`'s class comment; needs a Remote Site Setting added post-deploy and hasn't been verified against a live org from this environment |
+| `SYNCHRONOUS_DML` | Bypasses platform events, inserts directly | Fastest and simplest, but **loses rollback-safety entirely** — if the surrounding transaction rolls back, so do your log entries. Use for local debugging or when platform event allocations are exhausted |
+
+Other controls:
 
 | Method | Behavior |
 |---|---|
-| `Logger.flush()` | Publish everything buffered so far as one call |
-| `Logger.flushBuffer()` | Discard everything buffered, without publishing |
+| `Logger.flushBuffer()` | Discard everything buffered, without saving |
 | `Logger.suspendSaving()` / `resumeSaving()` | Ignore log calls entirely until resumed — useful for silencing a known-noisy code path without removing call sites |
-| `Logger.setSyncMode(true)` | Bypass platform events and insert `Log__c`/`Log_Entry__c` directly and synchronously — for local debugging (see the real DML error immediately) or as a fallback if your org's platform event allocation is exhausted. **Loses rollback-safety while enabled.** |
+| `Logger.setSaveMethod(method)` | Changes the default `saveLog()`/`flush()` uses for the rest of the transaction |
+| `Logger.setParentLogTransactionId(String)` | Threads a batch/queueable job's separate transactions back to the log that kicked it off |
 
-There's also a separate, **org-wide** daily/hourly limit on platform events published (varies by edition — see [Salesforce's Platform Event Limits](https://developer.salesforce.com/docs/atlas.en-us.platform_events.meta/platform_events/platform_event_limits.htm)). Batching solves the per-transaction risk; it doesn't remove this ceiling. Nebula Logger's own troubleshooting docs flag the same thing — worth monitoring in a very high-volume org.
+There's also a separate, **org-wide** daily/hourly limit on platform events published (varies by edition — see [Salesforce's Platform Event Limits](https://developer.salesforce.com/docs/atlas.en-us.platform_events.meta/platform_events/platform_event_limits.htm)). Batching solves the per-transaction risk; it doesn't remove this ceiling — worth monitoring in a very high-volume org.
+
+---
+
+## Fluent builder, tags, and lazy-formatted messages
+
+Every `Logger.error()/warn()/info()/debug()` call returns a `LogEntryBuilder` so you can chain additional detail onto the same entry without extra Logger calls:
+
+```apex
+Logger.error('CBHttpClient.patch', 'Callout failed', ex)
+    .setRecord(quote.Id)      // links Log_Entry__c.RelatedRecordId__c
+    .addTag('chargebee')
+    .addTag('shipping-address');
+```
+
+Tags are stored raw on the entry (`Tags__c`) and normalized on persist into `Log_Tag__c` (deduped by name) and `Log_Entry_Tag__c` (junction) — so `SELECT ... FROM Log_Entry_Tag__c WHERE Log_Tag__r.Name = 'chargebee'` finds every entry ever tagged that way, across every transaction.
+
+For messages expensive to build, `LogMessage` defers `String.format()` until `Logger` has already decided the entry passes the configured minimum level — so a `DEBUG` call that gets filtered out never pays the formatting cost:
+
+```apex
+Logger.debug('MyBatch.execute', new LogMessage('processed {0} of {1} records', processed, total));
+```
 
 ---
 
@@ -182,9 +244,9 @@ There's also a separate, **org-wide** daily/hourly limit on platform events publ
 
 ## Tests
 
-10 classes, full coverage of the Apex surface:
+13 classes, full coverage of the Apex surface:
 
-`LogLevelTest` · `LogMaskingTest` · `LogLevelSettingSelectorTest` · `LogEntryEventHandlerTest` · `LoggerTest` · `LoggerInvocableTest` · `LogPurgeBatchTest` · `LogAlertServiceTest` · `LogAlertQueueableTest` · `LogViewerControllerTest`
+`LogLevelTest` · `LogMaskingTest` · `LogLevelSettingSelectorTest` · `LogEntryEventHandlerTest` · `LoggerTest` · `LoggerInvocableTest` · `LogPurgeBatchTest` · `LogAlertServiceTest` · `LogAlertQueueableTest` · `LogViewerControllerTest` · `LogEntryBuilderTest` · `LogMessageTest` · `LogRestSaverTest`
 
 > Platform-event delivery in tests uses `Test.getEventBus().deliver()` after `Test.stopTest()` — that's what fires `LogEntryEventTrigger` synchronously so persisted rows can actually be asserted on.
 
@@ -203,13 +265,27 @@ See **[`PACKAGING.md`](PACKAGING.md)** for the full `sf package create` → `ver
 ## Changelog
 
 <details open>
+<summary><strong>v1.3</strong> — Save methods, tagging, fluent builder, transaction correlation</summary>
+
+- **`Logger.SaveMethod` enum** — `EVENT_BUS` (default), `QUEUEABLE`, `REST` (experimental), `SYNCHRONOUS_DML`; `Logger.saveLog(method)` for a one-off, `setSaveMethod(method)` to change the default
+- **Fluent builder** — every log call returns a `LogEntryBuilder` for chaining `.setRecord()`, `.addTag()`, `.setExceptionDetails()`
+- **Tagging** — `Log_Tag__c`/`Log_Entry_Tag__c`, normalized and deduped on persist from `LogEntryBuilder.addTag()`/`addTags()`
+- **Parent/child transaction correlation** — `Logger.setParentLogTransactionId(String)` + `Log__c.ParentLog__c`, for threading batch/queueable jobs' separate transactions back to the log that kicked them off
+- **`LogMessage`** — lazy `String.format()`, skipped entirely when the entry's level is filtered out
+- New classes: `LogEntryBuilder`, `LogMessage`, `LogSaveQueueable`, `LogRestSaver`
+- *Known gap, called out explicitly:* `LogRestSaver` (the `REST` save method) could not be verified against a live org from this environment — needs a Remote Site Setting added post-deploy and a sandbox test before relying on it
+- *Roadmap — not yet built:* a plugin framework for custom automation on `Log__c`/`Log_Entry__c` triggers; additional Flow invocable actions beyond the single "Log Message" action; an Aura-compatible client logger component (LWC-only today); a "Related Log Entries" component for record pages; real-time log streaming; quick actions for managing log status/priority/ownership
+
+</details>
+
+<details>
 <summary><strong>v1.2</strong> — Fixed a governor-limit bug in Logger's flush behavior</summary>
 
 - **Fix:** removed an auto-flush-on-every-`ERROR`-call bug that could exceed the 150-`EventBus.publish()`-calls-per-transaction limit in any loop logging many errors
-- `Logger` now buffers everything and only publishes on explicit `flush()`, matching Nebula Logger's model
-- Added `flushBuffer()`, `suspendSaving()`/`resumeSaving()`, and `setSyncMode()` — mirrors Nebula Logger's save-control API
-- New README section: [Governor limits](#governor-limits-why-flush-works-the-way-it-does)
-- **Action needed if you already deployed v1.1 or earlier:** redeploy `Logger.cls` and update any call sites to call `flush()` in a `finally` block — buffered entries are no longer auto-persisted on `ERROR`
+- `Logger` now buffers everything and only saves on explicit `saveLog()`/`flush()`
+- Added `flushBuffer()` and `suspendSaving()`/`resumeSaving()` as explicit save controls
+- New README section: [Governor limits](#governor-limits-why-savelogflush-work-the-way-they-do)
+- **Action needed if you already deployed v1.1 or earlier:** redeploy `Logger.cls` and update any call sites to call `saveLog()`/`flush()` in a `finally` block — buffered entries are no longer auto-persisted on `ERROR`
 
 </details>
 
@@ -262,6 +338,8 @@ See **[`PACKAGING.md`](PACKAGING.md)** for the full `sf package create` → `ver
 - No test proving `LogAlertQueueable` behavior on a non-200 Slack response (currently swallowed/logged to debug)
 - Global JS error boundary is opt-in per app shell, not auto-wired into every LWC in a client org
 - `Log_Fault_Handler` Flow has no automated test (Flow tests are separate from Apex `RunLocalTests` coverage) — verify manually in a sandbox after deploying, e.g. by wiring it to a deliberately-failing Fault Connector
+- `LogRestSaver` (`REST` save method) is unverified against a live org — see the v1.3 changelog entry above for what's needed before relying on it
+- A plugin framework, additional Flow actions, an Aura-compatible client logger, a record-page "related log entries" component, real-time streaming, and log-management quick actions (status/priority/ownership) are not built — tracked as roadmap items, not silently dropped
 
 ---
 

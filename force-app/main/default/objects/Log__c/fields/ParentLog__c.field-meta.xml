@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>ParentLog__c</fullName>
+    <label>Parent Log</label>
+    <type>Lookup</type>
+    <referenceTo>Log__c</referenceTo>
+    <relationshipName>Child_Logs</relationshipName>
+    <relationshipLabel>Child Logs</relationshipLabel>
+    <description>Relates a batch/queueable job's own transaction (which always gets a new transaction id) back to the log that kicked it off, via Logger.setParentLogTransactionId().</description>
+</CustomField>

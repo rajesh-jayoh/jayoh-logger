@@ -3,9 +3,8 @@ private class LoggerTest {
 
     @isTest
     static void testErrorDoesNotAutoFlush() {
-        // This is the behavior change from the earlier buggy version: ERROR
-        // no longer publishes immediately on every call. Without an explicit
-        // flush(), nothing should be persisted yet.
+        // ERROR does not publish immediately on every call. Without an
+        // explicit saveLog()/flush(), nothing should be persisted yet.
         Test.startTest();
         Logger.error('LoggerTest.testErrorDoesNotAutoFlush', 'Boom', new DmlException('bad'));
         Test.getEventBus().deliver();
@@ -14,21 +13,21 @@ private class LoggerTest {
         List<Log_Entry__c> entries = [
             SELECT Id FROM Log_Entry__c WHERE Source__c = 'LoggerTest.testErrorDoesNotAutoFlush'
         ];
-        System.assertEquals(0, entries.size(), 'ERROR should be buffered, not auto-published, until flush() is called');
+        System.assertEquals(0, entries.size(), 'ERROR should be buffered, not auto-published, until saveLog()/flush() is called');
     }
 
     @isTest
-    static void testErrorPersistsAfterExplicitFlush() {
+    static void testErrorPersistsAfterExplicitSaveLog() {
         Test.startTest();
-        Logger.error('LoggerTest.testErrorPersistsAfterExplicitFlush', 'Boom', new DmlException('bad'));
-        Logger.flush();
+        Logger.error('LoggerTest.testErrorPersistsAfterExplicitSaveLog', 'Boom', new DmlException('bad'));
+        Logger.saveLog();
         Test.getEventBus().deliver();
         Test.stopTest();
 
         List<Log_Entry__c> entries = [
             SELECT Level__c, Source__c, ExceptionType__c
             FROM Log_Entry__c
-            WHERE Source__c = 'LoggerTest.testErrorPersistsAfterExplicitFlush'
+            WHERE Source__c = 'LoggerTest.testErrorPersistsAfterExplicitSaveLog'
         ];
         System.assertEquals(1, entries.size());
         System.assertEquals('ERROR', entries[0].Level__c);
@@ -39,7 +38,7 @@ private class LoggerTest {
     static void testInfoLogRequiresExplicitFlush() {
         Test.startTest();
         Logger.info('LoggerTest.testInfoLogRequiresExplicitFlush', 'just fyi');
-        Logger.flush();
+        Logger.flush(); // alias for saveLog()
         Test.getEventBus().deliver();
         Test.stopTest();
 
@@ -53,8 +52,6 @@ private class LoggerTest {
 
     @isTest
     static void testDebugBelowDefaultThresholdIsSuppressed() {
-        // Default CMDT record ships with MinimumLevel__c = INFO, so DEBUG
-        // calls should be filtered out and never reach the platform event bus.
         Test.startTest();
         Logger.debug('LoggerTest.testDebugBelowDefaultThresholdIsSuppressed', 'should not persist');
         Logger.flush();
@@ -71,7 +68,7 @@ private class LoggerTest {
     @isTest
     static void testFlushWithEmptyBufferDoesNotThrow() {
         Test.startTest();
-        Logger.flush(); // nothing buffered
+        Logger.flush();
         Test.stopTest();
         System.assert(true);
     }
@@ -93,34 +90,24 @@ private class LoggerTest {
     }
 
     @isTest
-    static void testBulkLoggingTriggersAutoFlushAtBufferCap() {
-        // Buffer caps at 200 and auto-flushes as a heap-size safety net only —
-        // NOT a per-entry or per-level flush. 250 INFO calls should trigger at
-        // most one internal safety flush plus the final explicit flush(), and
-        // every entry should still make it through to Log_Entry__c.
+    static void testBulkLoggingTriggersSafetyFlushAtBufferCap() {
         Test.startTest();
         for (Integer i = 0; i < 250; i++) {
-            Logger.info('LoggerTest.testBulkLoggingTriggersAutoFlushAtBufferCap', 'entry ' + i);
+            Logger.info('LoggerTest.testBulkLoggingTriggersSafetyFlushAtBufferCap', 'entry ' + i);
         }
-        Logger.flush(); // flush whatever remains under the cap
+        Logger.flush();
         Test.getEventBus().deliver();
         Test.stopTest();
 
         List<Log_Entry__c> entries = [
             SELECT Id FROM Log_Entry__c
-            WHERE Source__c = 'LoggerTest.testBulkLoggingTriggersAutoFlushAtBufferCap'
+            WHERE Source__c = 'LoggerTest.testBulkLoggingTriggersSafetyFlushAtBufferCap'
         ];
-        System.assertEquals(250, entries.size(), 'All 250 buffered entries should persist across at most two internal flushes, not 250 separate publish() calls');
+        System.assertEquals(250, entries.size(), 'All 250 buffered entries should persist across at most two internal saves, not 250 separate publish() calls');
     }
 
     @isTest
     static void testManyErrorsInALoopDoNotEachTriggerASeparatePublishCall() {
-        // The bug this test guards against: an earlier version of Logger
-        // auto-flushed on every single ERROR call. A loop logging 160 errors
-        // would have made 160 separate EventBus.publish() calls, risking the
-        // 150-calls-per-transaction governor limit. With buffering, this same
-        // loop makes at most one internal safety flush (at the 200 cap) plus
-        // one explicit flush() — nowhere near that ceiling.
         Test.startTest();
         for (Integer i = 0; i < 160; i++) {
             Logger.error('LoggerTest.testManyErrorsInALoopDoNotEachTriggerASeparatePublishCall', 'error ' + i);
@@ -192,7 +179,7 @@ private class LoggerTest {
     @isTest
     static void testFlushBufferDiscardsWithoutPersisting() {
         Logger.error('LoggerTest.testFlushBufferDiscardsWithoutPersisting', 'never saved');
-        Logger.flushBuffer(); // discard, not flush
+        Logger.flushBuffer();
 
         Test.startTest();
         Logger.flush(); // buffer is already empty — should be a no-op
@@ -206,19 +193,130 @@ private class LoggerTest {
     }
 
     @isTest
-    static void testSyncModeSkipsPlatformEventsAndInsertsDirectly() {
-        Logger.setSyncMode(true);
-        Logger.error('LoggerTest.testSyncModeSkipsPlatformEventsAndInsertsDirectly', 'synchronous path');
+    static void testSynchronousDmlSaveMethodSkipsPlatformEvents() {
+        Logger.error('LoggerTest.testSynchronousDmlSaveMethodSkipsPlatformEvents', 'synchronous path');
 
         Test.startTest();
-        Logger.flush(); // no Test.getEventBus().deliver() needed — this path never uses the event bus
+        Logger.saveLog(Logger.SaveMethod.SYNCHRONOUS_DML); // no Test.getEventBus().deliver() needed
         Test.stopTest();
-        Logger.setSyncMode(false); // reset so it doesn't leak into other test methods running in this transaction
 
         List<Log_Entry__c> entries = [
             SELECT Level__c FROM Log_Entry__c
-            WHERE Source__c = 'LoggerTest.testSyncModeSkipsPlatformEventsAndInsertsDirectly'
+            WHERE Source__c = 'LoggerTest.testSynchronousDmlSaveMethodSkipsPlatformEvents'
         ];
-        System.assertEquals(1, entries.size(), 'Sync mode should insert directly without requiring event bus delivery');
+        System.assertEquals(1, entries.size(), 'SYNCHRONOUS_DML should insert directly without requiring event bus delivery');
+    }
+
+    @isTest
+    static void testQueueableSaveMethodDefersToAsyncJob() {
+        Logger.error('LoggerTest.testQueueableSaveMethodDefersToAsyncJob', 'deferred');
+
+        Test.startTest();
+        Logger.saveLog(Logger.SaveMethod.QUEUEABLE);
+        Test.stopTest(); // enqueued jobs run at stopTest() in tests
+
+        List<Log_Entry__c> entries = [
+            SELECT Id FROM Log_Entry__c
+            WHERE Source__c = 'LoggerTest.testQueueableSaveMethodDefersToAsyncJob'
+        ];
+        System.assertEquals(1, entries.size());
+    }
+
+    @isTest
+    static void testSetSaveMethodChangesDefaultForSubsequentCalls() {
+        Logger.setSaveMethod(Logger.SaveMethod.SYNCHRONOUS_DML);
+        Logger.error('LoggerTest.testSetSaveMethodChangesDefaultForSubsequentCalls', 'via default sync');
+
+        Test.startTest();
+        Logger.flush(); // uses the default set above, not EVENT_BUS
+        Test.stopTest();
+        Logger.setSaveMethod(Logger.SaveMethod.EVENT_BUS); // reset for other tests in this transaction
+
+        List<Log_Entry__c> entries = [
+            SELECT Id FROM Log_Entry__c
+            WHERE Source__c = 'LoggerTest.testSetSaveMethodChangesDefaultForSubsequentCalls'
+        ];
+        System.assertEquals(1, entries.size());
+    }
+
+    @isTest
+    static void testFluentBuilderSetsRecordAndTag() {
+        Account acct = new Account(Name = 'Test Account');
+        insert acct;
+
+        Test.startTest();
+        Logger.error('LoggerTest.testFluentBuilderSetsRecordAndTag', 'boom')
+            .setRecord(acct.Id)
+            .addTag('chargebee')
+            .addTag('shipping-address');
+        Logger.flush();
+        Test.getEventBus().deliver();
+        Test.stopTest();
+
+        List<Log_Entry__c> entries = [
+            SELECT RelatedRecordId__c, Tags__c FROM Log_Entry__c
+            WHERE Source__c = 'LoggerTest.testFluentBuilderSetsRecordAndTag'
+        ];
+        System.assertEquals(1, entries.size());
+        System.assertEquals(acct.Id, (Id) entries[0].RelatedRecordId__c);
+        System.assert(entries[0].Tags__c.contains('chargebee'));
+        System.assert(entries[0].Tags__c.contains('shipping-address'));
+    }
+
+    @isTest
+    static void testFluentBuilderOnSuppressedEntryDoesNotThrow() {
+        // DEBUG is below the default INFO threshold — the builder should
+        // still be returned (never null) so chaining doesn't blow up, even
+        // though nothing gets buffered.
+        Test.startTest();
+        Logger.debug('LoggerTest.testFluentBuilderOnSuppressedEntryDoesNotThrow', 'suppressed')
+            .addTag('irrelevant')
+            .setRecord((Id) null);
+        Test.stopTest();
+        System.assert(true);
+    }
+
+    @isTest
+    static void testParentLogTransactionIdCorrelatesHeaders() {
+        // Simulate a "parent" transaction's log already having been saved...
+        Logger.error('LoggerTest.parent', 'parent entry');
+        Logger.saveLog(Logger.SaveMethod.SYNCHRONOUS_DML);
+        String parentTxnId = Logger.getTransactionId();
+
+        // ...then a "child" entry (as if from a batch job) pointing back to it.
+        Logger.setParentLogTransactionId(parentTxnId);
+        // Force a distinct transaction id for the child by going through a
+        // separate synchronous save path is not possible within one test
+        // transaction (transaction id is fixed per test method), so this
+        // verifies the correlation field is set and resolvable rather than
+        // simulating two real transactions.
+        Test.startTest();
+        Logger.info('LoggerTest.child', 'child entry');
+        Logger.saveLog(Logger.SaveMethod.SYNCHRONOUS_DML);
+        Test.stopTest();
+
+        Log__c header = [SELECT Id, ParentLog__c, TransactionId__c FROM Log__c WHERE TransactionId__c = :parentTxnId];
+        // Since both entries share the same real transaction id in a single
+        // test method, the "child" entry merges into the same header rather
+        // than creating a separate one — this at least proves setParentLogTransactionId()
+        // doesn't error, and ParentLog__c resolution is covered directly in
+        // LogEntryEventHandlerTest with two distinct synthetic transaction ids.
+        System.assertNotEquals(null, header.Id);
+    }
+
+    @isTest
+    static void testLogMessageOverloadUsesLazyFormatting() {
+        Test.startTest();
+        Logger.info('LoggerTest.testLogMessageOverloadUsesLazyFormatting', new LogMessage('processed {0} of {1}', 5, 10));
+        Logger.flush();
+        Test.getEventBus().deliver();
+        Test.stopTest();
+
+        List<Log_Entry__c> entries = [
+            SELECT Message__c FROM Log_Entry__c
+            WHERE Source__c = 'LoggerTest.testLogMessageOverloadUsesLazyFormatting'
+        ];
+        System.assertEquals(1, entries.size());
+        System.assertEquals('processed 5 of 10', entries[0].Message__c);
     }
 }
