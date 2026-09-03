@@ -40,7 +40,7 @@ Promote it once you're happy with it (required before installing in
 production, not required for sandboxes):
 ```bash
 sf package version promote \
-  --package "JayOh Logger@0.1.0-1" \
+  --package "JayOh Logger@1.0.0-1" \
   --target-dev-hub JayOhDevHub
 ```
 
@@ -48,7 +48,7 @@ sf package version promote \
 
 ```bash
 sf package install \
-  --package "JayOh Logger@0.1.0-1" \
+  --package "JayOh Logger@1.0.0-1" \
   --target-org BMUAT \
   --wait 10
 ```

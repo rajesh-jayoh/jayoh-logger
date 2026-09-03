@@ -8,7 +8,7 @@
 [![API Version](https://img.shields.io/badge/API-v67.0-0176D3)](sfdx-project.json)
 [![License](https://img.shields.io/badge/License-Unlicense-lightgrey)](#)
 [![Tests](https://img.shields.io/badge/tests-10%20classes-brightgreen)](#-tests)
-[![Status](https://img.shields.io/badge/status-v0.3-orange)](#-changelog)
+[![Status](https://img.shields.io/badge/status-v1.0-brightgreen)](#-changelog)
 
 *Inspired by [Nebula Logger](https://github.com/jongpie/NebulaLogger)'s core idea — reimplemented lean, and platform-event-backed from the ground up.*
 
@@ -145,7 +145,7 @@ See **[`PACKAGING.md`](PACKAGING.md)** for the full `sf package create` → `ver
 ## 🗺️ Changelog
 
 <details>
-<summary><strong>v0.3</strong> — Reports & packaging groundwork</summary>
+<summary><strong>v1.0</strong> — Reports & packaging groundwork</summary>
 
 - Custom report type `Log_And_Log_Entries` joining `Log__c` → `Log_Entry__c`
 - Starter reports: `Recent Errors` (last 7 days), `Errors by Source` (last 30 days, grouped)
