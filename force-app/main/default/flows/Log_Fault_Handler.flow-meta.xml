@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Flow xmlns="http://soap.sforce.com/2006/04/metadata">
+    <apiVersion>67.0</apiVersion>
+    <interviewLabel>Log Fault Handler {!$Flow.CurrentDateTime}</interviewLabel>
+    <label>Log Fault Handler</label>
+    <processType>AutoLaunchedFlow</processType>
+    <status>Active</status>
+
+    <description>Reusable Autolaunched Flow (call as a Subflow from any Fault Connector) that logs the fault via JayOh Logger's &quot;Log Message&quot; action. Pass the calling Flow's name as FaultSource and {!$Flow.FaultMessage} as FaultMessage.</description>
+
+    <variables>
+        <name>FaultSource</name>
+        <dataType>String</dataType>
+        <isCollection>false</isCollection>
+        <isInput>true</isInput>
+        <isOutput>false</isOutput>
+    </variables>
+    <variables>
+        <name>FaultMessage</name>
+        <dataType>String</dataType>
+        <isCollection>false</isCollection>
+        <isInput>true</isInput>
+        <isOutput>false</isOutput>
+    </variables>
+    <variables>
+        <name>RelatedRecordId</name>
+        <dataType>String</dataType>
+        <isCollection>false</isCollection>
+        <isInput>true</isInput>
+        <isOutput>false</isOutput>
+    </variables>
+
+    <start>
+        <locationX>50</locationX>
+        <locationY>0</locationY>
+        <connector>
+            <targetReference>LogTheFault</targetReference>
+        </connector>
+    </start>
+
+    <actionCalls>
+        <name>LogTheFault</name>
+        <label>Log Message</label>
+        <locationX>50</locationX>
+        <locationY>120</locationY>
+        <actionName>LoggerInvocable</actionName>
+        <actionType>apex</actionType>
+        <flowTransactionModel>CurrentTransaction</flowTransactionModel>
+        <inputParameters>
+            <name>level</name>
+            <value>
+                <stringValue>ERROR</stringValue>
+            </value>
+        </inputParameters>
+        <inputParameters>
+            <name>source</name>
+            <value>
+                <elementReference>FaultSource</elementReference>
+            </value>
+        </inputParameters>
+        <inputParameters>
+            <name>message</name>
+            <value>
+                <elementReference>FaultMessage</elementReference>
+            </value>
+        </inputParameters>
+        <inputParameters>
+            <name>relatedRecordId</name>
+            <value>
+                <elementReference>RelatedRecordId</elementReference>
+            </value>
+        </inputParameters>
+    </actionCalls>
+</Flow>
