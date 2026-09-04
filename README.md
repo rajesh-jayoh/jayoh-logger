@@ -7,8 +7,8 @@
 [![Salesforce](https://img.shields.io/badge/Salesforce-Apex-00A1E0)](https://developer.salesforce.com/)
 [![API Version](https://img.shields.io/badge/API-v67.0-0176D3)](sfdx-project.json)
 [![License](https://img.shields.io/badge/License-Unlicense-lightgrey)](#)
-[![Tests](https://img.shields.io/badge/tests-13%20classes-brightgreen)](#tests)
-[![Status](https://img.shields.io/badge/status-v1.3-brightgreen)](#changelog)
+[![Tests](https://img.shields.io/badge/tests-14%20classes-brightgreen)](#tests)
+[![Status](https://img.shields.io/badge/status-v1.4-brightgreen)](#changelog)
 
 *A native, platform-event-backed logging framework — built for reuse across every client org.*
 
@@ -55,6 +55,8 @@ flowchart LR
 | **Alerting** | Email + Slack on `ERROR`, toggled per org |
 | **Retention + export** | Scheduled purge batch, with an optional CSV email before anything's deleted |
 | **LWC log viewer** | Drop-in component to browse recent logs without leaving the app |
+| **Related Log Entries** | Record-page component showing every log entry tied to that specific record |
+| **Log triage** | `Status__c`/`Priority__c` on `Log__c` + a "Manage Log" quick action to edit them inline |
 | **Client-side capture** | Global JS error boundary for LWC — uncaught errors stop vanishing into the console |
 | **Reports** | Custom report type + two starter reports (`Recent Errors`, `Errors by Source`) |
 | **Flow & LWC entry points** | `@InvocableMethod` and `@AuraEnabled` — not Apex-only |
@@ -75,8 +77,9 @@ force-app/main/default/
 │                       Log_Level_Setting__mdt · Log_Alert_Setting__mdt
 │                       Log_Masking_Pattern__mdt
 ├── customMetadata/     Seeded defaults for the three CMDTs above
-├── lwc/                logViewer (visible)  ·  loggerClient (headless utility)
+├── lwc/                logViewer, relatedLogEntries (visible)  ·  loggerClient (headless utility)
 ├── flows/              Log_Fault_Handler (reusable Subflow for Fault Connectors)
+├── quickActions/       Manage Log (edit Status/Priority/Owner on Log__c)
 ├── reportTypes/        Log_And_Log_Entries
 └── reports/            Recent Errors · Errors by Source
 ```
@@ -244,9 +247,9 @@ Logger.debug('MyBatch.execute', new LogMessage('processed {0} of {1} records', p
 
 ## Tests
 
-13 classes, full coverage of the Apex surface:
+14 classes, full coverage of the Apex surface:
 
-`LogLevelTest` · `LogMaskingTest` · `LogLevelSettingSelectorTest` · `LogEntryEventHandlerTest` · `LoggerTest` · `LoggerInvocableTest` · `LogPurgeBatchTest` · `LogAlertServiceTest` · `LogAlertQueueableTest` · `LogViewerControllerTest` · `LogEntryBuilderTest` · `LogMessageTest` · `LogRestSaverTest`
+`LogLevelTest` · `LogMaskingTest` · `LogLevelSettingSelectorTest` · `LogEntryEventHandlerTest` · `LoggerTest` · `LoggerInvocableTest` · `LogPurgeBatchTest` · `LogAlertServiceTest` · `LogAlertQueueableTest` · `LogViewerControllerTest` · `LogEntryBuilderTest` · `LogMessageTest` · `LogRestSaverTest` · `RelatedLogEntriesControllerTest`
 
 > Platform-event delivery in tests uses `Test.getEventBus().deliver()` after `Test.stopTest()` — that's what fires `LogEntryEventTrigger` synchronously so persisted rows can actually be asserted on.
 
@@ -265,6 +268,15 @@ See **[`PACKAGING.md`](PACKAGING.md)** for the full `sf package create` → `ver
 ## Changelog
 
 <details open>
+<summary><strong>v1.4</strong> — Record-page visibility and log triage</summary>
+
+- **`relatedLogEntries` LWC** — drop onto any object's record page; shows every `Log_Entry__c` whose `RelatedRecordId__c` matches that record, via `RelatedLogEntriesController`
+- **Log triage fields** — `Log__c.Status__c` (New/Investigating/Resolved/Ignored), `Priority__c` (Low/Medium/High/Critical), and a formula `IsClosed__c`
+- **"Manage Log" quick action** — inline edit of Status/Priority/Owner without leaving the record
+
+</details>
+
+<details>
 <summary><strong>v1.3</strong> — Save methods, tagging, fluent builder, transaction correlation</summary>
 
 - **`Logger.SaveMethod` enum** — `EVENT_BUS` (default), `QUEUEABLE`, `REST` (experimental), `SYNCHRONOUS_DML`; `Logger.saveLog(method)` for a one-off, `setSaveMethod(method)` to change the default
@@ -274,7 +286,7 @@ See **[`PACKAGING.md`](PACKAGING.md)** for the full `sf package create` → `ver
 - **`LogMessage`** — lazy `String.format()`, skipped entirely when the entry's level is filtered out
 - New classes: `LogEntryBuilder`, `LogMessage`, `LogSaveQueueable`, `LogRestSaver`
 - *Known gap, called out explicitly:* `LogRestSaver` (the `REST` save method) could not be verified against a live org from this environment — needs a Remote Site Setting added post-deploy and a sandbox test before relying on it
-- *Roadmap — not yet built:* a plugin framework for custom automation on `Log__c`/`Log_Entry__c` triggers; additional Flow invocable actions beyond the single "Log Message" action; an Aura-compatible client logger component (LWC-only today); a "Related Log Entries" component for record pages; real-time log streaming; quick actions for managing log status/priority/ownership
+- *Roadmap — not yet built:* a plugin framework for custom automation on `Log__c`/`Log_Entry__c` triggers; additional Flow invocable actions beyond the single "Log Message" action; an Aura-compatible client logger component (LWC-only today); real-time log streaming
 
 </details>
 
@@ -339,7 +351,7 @@ See **[`PACKAGING.md`](PACKAGING.md)** for the full `sf package create` → `ver
 - Global JS error boundary is opt-in per app shell, not auto-wired into every LWC in a client org
 - `Log_Fault_Handler` Flow has no automated test (Flow tests are separate from Apex `RunLocalTests` coverage) — verify manually in a sandbox after deploying, e.g. by wiring it to a deliberately-failing Fault Connector
 - `LogRestSaver` (`REST` save method) is unverified against a live org — see the v1.3 changelog entry above for what's needed before relying on it
-- A plugin framework, additional Flow actions, an Aura-compatible client logger, a record-page "related log entries" component, real-time streaming, and log-management quick actions (status/priority/ownership) are not built — tracked as roadmap items, not silently dropped
+- A plugin framework, additional Flow actions, an Aura-compatible client logger, and real-time streaming are not built — tracked as roadmap items, not silently dropped
 
 ---
 

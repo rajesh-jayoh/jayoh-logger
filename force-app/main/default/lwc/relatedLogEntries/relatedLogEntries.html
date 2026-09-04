@@ -1,0 +1,27 @@
+<template>
+    <lightning-card title="Related Log Entries" icon-name="standard:log_a_call">
+        <template if:true={isLoading}>
+            <lightning-spinner alternative-text="Loading" size="small"></lightning-spinner>
+        </template>
+        <template if:false={isLoading}>
+            <template if:true={hasEntries}>
+                <template for:each={entries} for:item="entry">
+                    <div key={entry.id} class="slds-p-around_small slds-border_bottom">
+                        <p>
+                            <span class={entry.severityClass}>{entry.level}</span>
+                            &nbsp;—&nbsp;{entry.source}&nbsp;
+                            <span class="slds-text-color_weak">({entry.formattedDate})</span>
+                        </p>
+                        <p>{entry.message}</p>
+                        <template if:true={entry.exceptionType}>
+                            <p class="slds-text-color_error">{entry.exceptionType}</p>
+                        </template>
+                    </div>
+                </template>
+            </template>
+            <template if:false={hasEntries}>
+                <p class="slds-p-around_medium slds-text-color_weak">No log entries found for this record.</p>
+            </template>
+        </template>
+    </lightning-card>
+</template>

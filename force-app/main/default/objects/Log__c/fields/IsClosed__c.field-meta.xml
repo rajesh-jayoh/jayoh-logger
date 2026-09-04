@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>IsClosed__c</fullName>
+    <label>Is Closed</label>
+    <type>Checkbox</type>
+    <formula>OR(ISPICKVAL(Status__c, &quot;Resolved&quot;), ISPICKVAL(Status__c, &quot;Ignored&quot;))</formula>
+</CustomField>
