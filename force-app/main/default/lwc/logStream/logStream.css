@@ -1,0 +1,17 @@
+.stream-container {
+    max-height: 480px;
+}
+.sev-error {
+    color: #c23934;
+    font-weight: bold;
+}
+.sev-warn {
+    color: #b57c00;
+    font-weight: bold;
+}
+.sev-info {
+    color: #444;
+}
+.sev-debug {
+    color: #706e6b;
+}

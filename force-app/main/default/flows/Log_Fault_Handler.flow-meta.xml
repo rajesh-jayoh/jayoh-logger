@@ -6,7 +6,7 @@
     <processType>AutoLaunchedFlow</processType>
     <status>Active</status>
 
-    <description>Reusable Autolaunched Flow (call as a Subflow from any Fault Connector) that logs the fault via JayOh Logger's &quot;Log Message&quot; action. Pass the calling Flow's name as FaultSource and {!$Flow.FaultMessage} as FaultMessage.</description>
+    <description>Reusable Autolaunched Flow (call as a Subflow from any Fault Connector) that logs the fault via JayOh Logger's &quot;Log Message&quot; action, then explicitly saves it. Pass the calling Flow's name as FaultSource and {!$Flow.FaultMessage} as FaultMessage.</description>
 
     <variables>
         <name>FaultSource</name>
@@ -43,9 +43,12 @@
         <label>Log Message</label>
         <locationX>50</locationX>
         <locationY>120</locationY>
-        <actionName>LoggerInvocable</actionName>
+        <actionName>LoggerFlowLogMessageAction</actionName>
         <actionType>apex</actionType>
         <flowTransactionModel>CurrentTransaction</flowTransactionModel>
+        <connector>
+            <targetReference>SaveTheLog</targetReference>
+        </connector>
         <inputParameters>
             <name>level</name>
             <value>
@@ -70,5 +73,15 @@
                 <elementReference>RelatedRecordId</elementReference>
             </value>
         </inputParameters>
+    </actionCalls>
+
+    <actionCalls>
+        <name>SaveTheLog</name>
+        <label>Save Log</label>
+        <locationX>50</locationX>
+        <locationY>240</locationY>
+        <actionName>LoggerFlowSaveLogAction</actionName>
+        <actionType>apex</actionType>
+        <flowTransactionModel>CurrentTransaction</flowTransactionModel>
     </actionCalls>
 </Flow>

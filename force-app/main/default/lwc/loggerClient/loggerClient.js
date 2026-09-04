@@ -12,7 +12,7 @@
  *   // app-wide, call once from your top-level/shell component's connectedCallback:
  *   installGlobalErrorBoundary('myAppShell');
  */
-import logFromClient from '@salesforce/apex/LoggerInvocable.logFromClient';
+import logFromClient from '@salesforce/apex/LoggerClientInvocable.logFromClient';
 
 export function logError(source, error, relatedRecordId) {
     const message = extractMessage(error);

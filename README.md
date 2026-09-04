@@ -8,7 +8,7 @@
 [![API Version](https://img.shields.io/badge/API-v67.0-0176D3)](sfdx-project.json)
 [![License](https://img.shields.io/badge/License-Unlicense-lightgrey)](#)
 [![Tests](https://img.shields.io/badge/tests-14%20classes-brightgreen)](#tests)
-[![Status](https://img.shields.io/badge/status-v1.4-brightgreen)](#changelog)
+[![Status](https://img.shields.io/badge/status-v1.5-brightgreen)](#changelog)
 
 *A native, platform-event-backed logging framework — built for reuse across every client org.*
 
@@ -56,10 +56,11 @@ flowchart LR
 | **Retention + export** | Scheduled purge batch, with an optional CSV email before anything's deleted |
 | **LWC log viewer** | Drop-in component to browse recent logs without leaving the app |
 | **Related Log Entries** | Record-page component showing every log entry tied to that specific record |
+| **Live log stream** | `logStream` LWC subscribes directly to the platform event channel via `empApi` — no polling |
 | **Log triage** | `Status__c`/`Priority__c` on `Log__c` + a "Manage Log" quick action to edit them inline |
 | **Client-side capture** | Global JS error boundary for LWC — uncaught errors stop vanishing into the console |
 | **Reports** | Custom report type + two starter reports (`Recent Errors`, `Errors by Source`) |
-| **Flow & LWC entry points** | `@InvocableMethod` and `@AuraEnabled` — not Apex-only |
+| **Four Flow actions** | Log Message, Add Log Entry for a Record, Add Log Entry for a Record Collection, Save Log |
 
 ---
 
@@ -67,7 +68,10 @@ flowchart LR
 
 ```
 force-app/main/default/
-├── classes/            Logger, LogEntryBuilder, LogMessage, LoggerInvocable,
+├── classes/            Logger, LogEntryBuilder, LogMessage,
+│                       LoggerFlowLogMessageAction, LoggerFlowLogRecordAction,
+│                       LoggerFlowLogRecordCollectionAction, LoggerFlowSaveLogAction,
+│                       LoggerFlowSupport, LoggerClientInvocable,
 │                       LogEntryEventHandler, LogSaveQueueable, LogRestSaver,
 │                       LogAlertService, LogMasking, LogPurgeBatch,
 │                       LogViewerController, LogLevelSettingSelector …
@@ -77,7 +81,7 @@ force-app/main/default/
 │                       Log_Level_Setting__mdt · Log_Alert_Setting__mdt
 │                       Log_Masking_Pattern__mdt
 ├── customMetadata/     Seeded defaults for the three CMDTs above
-├── lwc/                logViewer, relatedLogEntries (visible)  ·  loggerClient (headless utility)
+├── lwc/                logViewer, relatedLogEntries, logStream (visible)  ·  loggerClient (headless utility)
 ├── flows/              Log_Fault_Handler (reusable Subflow for Fault Connectors)
 ├── quickActions/       Manage Log (edit Status/Priority/Owner on Log__c)
 ├── reportTypes/        Log_And_Log_Entries
@@ -151,22 +155,24 @@ System.schedule('JayOh Log Purge - Weekly', '0 0 2 ? * SUN', new LogPurgeBatch()
 
 ## Logging from Flow
 
-`LoggerInvocable.logFromFlow` is exposed as an invocable action labeled **"Log Message"**, available in Screen Flows, Autolaunched Flows, and Record-Triggered Flows. It takes:
+Four separate invocable actions, available in Screen Flows, Autolaunched Flows, and Record-Triggered Flows:
 
-| Input | Required | Notes |
-|---|---|---|
-| `level` | Yes | `ERROR`, `WARN`, `INFO`, or `DEBUG` |
-| `source` | Yes | Free text — use the Flow's name, e.g. `Flow: Renewal_Closed_Won` |
-| `message` | Yes | The text to log |
-| `relatedRecordId` | No | Any record Id to link the entry to |
+| Action | Class | Inputs | Notes |
+|---|---|---|---|
+| **Log Message** | `LoggerFlowLogMessageAction` | `level`, `source`, `message`, `relatedRecordId` (optional), `tags` (optional, comma-separated) | General-purpose entry, not tied to a specific record |
+| **Add Log Entry for a Record** | `LoggerFlowLogRecordAction` | `level`, `source`, `message`, `record`, `tags` (optional) | Links the entry to a specific record via `setRecord()` |
+| **Add Log Entry for a Record Collection** | `LoggerFlowLogRecordCollectionAction` | `level`, `source`, `message`, `records`, `tags` (optional) | One entry per record in the collection, bulkified |
+| **Save Log** | `LoggerFlowSaveLogAction` | *(none)* | Publishes everything buffered so far by any of the three actions above |
+
+**None of the three logging actions save anything by themselves — they only buffer.** You must add a single **Save Log** action to actually publish. This mirrors the same buffer-then-save discipline `Logger` uses in Apex (see [Governor limits](#governor-limits-why-savelogflush-work-the-way-they-do) below) and for the same reason: a Loop calling "Log Message" once per iteration, if it also saved on every iteration, would make one `EventBus.publish()` call per loop iteration and risk the 150-calls-per-transaction limit. Add **Save Log** once, after the loop — not inside it.
 
 **Ad hoc logging inside a Flow:**
 
-Drop the action anywhere you want a checkpoint logged — after a Get Records, before a risky Update, etc.
+Drop "Log Message" (or one of the record-based actions) anywhere you want a checkpoint logged, then a single "Save Log" at the point where you want it actually persisted — typically right before the Flow ends, or right after a loop.
 
 **Catching Flow faults (the higher-value use case):**
 
-Flow doesn't log unhandled errors anywhere durable by default — a fault just shows the user a generic error and the transaction is gone. Wire "Log Message" into the **Fault Connector** of any element that can fail (Create/Update/Delete Records, Apex Actions, Sub-flows):
+Flow doesn't log unhandled errors anywhere durable by default — a fault just shows the user a generic error and the transaction is gone. Wire "Log Message" into the **Fault Connector** of any element that can fail (Create/Update/Delete Records, Apex Actions, Sub-flows), followed by "Save Log":
 
 - `level`: `ERROR`
 - `source`: the Flow's name (hardcode it — `$Flow.CurrentFlow` variables aren't reliably available in every context)
@@ -174,7 +180,7 @@ Flow doesn't log unhandled errors anywhere durable by default — a fault just s
 
 Because this goes through the same platform-event pipeline as everything else, a Flow fault logged this way survives even though the Flow's own DML rolled back — same guarantee Apex gets.
 
-**Recommended pattern:** a ready-made reusable Subflow ships with this package — `flows/Log_Fault_Handler.flow-meta.xml`. Connect any element's Fault Connector to it and pass:
+**Recommended pattern:** a ready-made reusable Subflow ships with this package — `flows/Log_Fault_Handler.flow-meta.xml` — and already includes both the "Log Message" and "Save Log" steps internally, so you don't have to remember to chain them yourself. Connect any element's Fault Connector to it and pass:
 
 - `FaultSource`: the calling Flow's name, hardcoded (e.g. `Renewal_Closed_Won`)
 - `FaultMessage`: `{!$Flow.FaultMessage}`
@@ -249,7 +255,7 @@ Logger.debug('MyBatch.execute', new LogMessage('processed {0} of {1} records', p
 
 14 classes, full coverage of the Apex surface:
 
-`LogLevelTest` · `LogMaskingTest` · `LogLevelSettingSelectorTest` · `LogEntryEventHandlerTest` · `LoggerTest` · `LoggerInvocableTest` · `LogPurgeBatchTest` · `LogAlertServiceTest` · `LogAlertQueueableTest` · `LogViewerControllerTest` · `LogEntryBuilderTest` · `LogMessageTest` · `LogRestSaverTest` · `RelatedLogEntriesControllerTest`
+`LogLevelTest` · `LogMaskingTest` · `LogLevelSettingSelectorTest` · `LogEntryEventHandlerTest` · `LoggerTest` · `LoggerFlowActionsTest` · `LogPurgeBatchTest` · `LogAlertServiceTest` · `LogAlertQueueableTest` · `LogViewerControllerTest` · `LogEntryBuilderTest` · `LogMessageTest` · `LogRestSaverTest` · `RelatedLogEntriesControllerTest`
 
 > Platform-event delivery in tests uses `Test.getEventBus().deliver()` after `Test.stopTest()` — that's what fires `LogEntryEventTrigger` synchronously so persisted rows can actually be asserted on.
 
@@ -268,6 +274,19 @@ See **[`PACKAGING.md`](PACKAGING.md)** for the full `sf package create` → `ver
 ## Changelog
 
 <details open>
+<summary><strong>v1.5</strong> — Expanded Flow actions and real-time log streaming</summary>
+
+- **Split `LoggerInvocable` into one class per Flow action** (`LoggerFlowLogMessageAction`, `LoggerFlowLogRecordAction`, `LoggerFlowLogRecordCollectionAction`, `LoggerFlowSaveLogAction`, plus `LoggerFlowSupport` for shared logic and `LoggerClientInvocable` for the LWC/Aura entry point) — Flow references an Apex invocable action unambiguously by class name, which breaks down once a single class has more than one `@InvocableMethod`
+- **New Flow actions:** "Add Log Entry for a Record" and "Add Log Entry for a Record Collection" (one entry per record, bulkified), both supporting the same `tags` input as "Log Message"
+- **Breaking change, and a real bug fix:** "Log Message" no longer auto-saves — it only buffers, exactly like `Logger` does in Apex. A Flow loop that called this action once per iteration was making one `EventBus.publish()` call per iteration, risking the same 150-calls-per-transaction limit fixed in v1.2 for Apex. Add the new **"Save Log"** action once, after any loop — not inside it
+- **`Log_Fault_Handler` updated** to call the renamed action class and now includes its own internal "Save Log" step, so existing callers of the subflow don't need to change anything
+- **`logStream` LWC** — live view of `Log_Entry_Event__e` via `empApi`, no polling, no Apex controller; caps at the 50 most recent entries per session
+- **Action needed if you already deployed v1.4 or earlier and use Flow logging directly (not through `Log_Fault_Handler`):** any Flow calling the old "Log Message" action must add a "Save Log" action after it, or entries will silently stop persisting
+- *Not covered:* no Jest tests for `logStream` (LWC tests aren't required for Apex deploy coverage, but this component hasn't been exercised beyond manual review)
+
+</details>
+
+<details>
 <summary><strong>v1.4</strong> — Record-page visibility and log triage</summary>
 
 - **`relatedLogEntries` LWC** — drop onto any object's record page; shows every `Log_Entry__c` whose `RelatedRecordId__c` matches that record, via `RelatedLogEntriesController`
@@ -351,7 +370,8 @@ See **[`PACKAGING.md`](PACKAGING.md)** for the full `sf package create` → `ver
 - Global JS error boundary is opt-in per app shell, not auto-wired into every LWC in a client org
 - `Log_Fault_Handler` Flow has no automated test (Flow tests are separate from Apex `RunLocalTests` coverage) — verify manually in a sandbox after deploying, e.g. by wiring it to a deliberately-failing Fault Connector
 - `LogRestSaver` (`REST` save method) is unverified against a live org — see the v1.3 changelog entry above for what's needed before relying on it
-- A plugin framework, additional Flow actions, an Aura-compatible client logger, and real-time streaming are not built — tracked as roadmap items, not silently dropped
+- `logStream` needs read access to `Log_Entry_Event__e` for the running user and hasn't been verified against a live org's Streaming API from this environment — no Jest test either
+- A plugin framework and an Aura-compatible client logger are not built — tracked as roadmap items, not silently dropped
 
 ---
 

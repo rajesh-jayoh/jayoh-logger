@@ -1,0 +1,30 @@
+<template>
+    <lightning-card title="JayOh Logger — Live Stream" icon-name="standard:live_chat">
+        <div slot="actions">
+            <lightning-button-icon
+                icon-name={statusIcon}
+                variant={statusVariant}
+                alternative-text={statusLabel}
+                title={statusLabel}>
+            </lightning-button-icon>
+        </div>
+
+        <template if:true={hasEntries}>
+            <div class="slds-scrollable_y stream-container">
+                <template for:each={entries} for:item="entry">
+                    <div key={entry.key} class="slds-p-around_small slds-border_bottom">
+                        <p>
+                            <span class={entry.severityClass}>{entry.level}</span>
+                            &nbsp;—&nbsp;{entry.source}&nbsp;
+                            <span class="slds-text-color_weak">({entry.formattedTime})</span>
+                        </p>
+                        <p>{entry.message}</p>
+                    </div>
+                </template>
+            </div>
+        </template>
+        <template if:false={hasEntries}>
+            <p class="slds-p-around_medium slds-text-color_weak">Listening for new log entries — nothing published yet this session.</p>
+        </template>
+    </lightning-card>
+</template>
