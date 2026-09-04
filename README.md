@@ -371,7 +371,13 @@ See **[`PACKAGING.md`](PACKAGING.md)** for the full `sf package create` → `ver
 - `Log_Fault_Handler` Flow has no automated test (Flow tests are separate from Apex `RunLocalTests` coverage) — verify manually in a sandbox after deploying, e.g. by wiring it to a deliberately-failing Fault Connector
 - `LogRestSaver` (`REST` save method) is unverified against a live org — see the v1.3 changelog entry above for what's needed before relying on it
 - `logStream` needs read access to `Log_Entry_Event__e` for the running user and hasn't been verified against a live org's Streaming API from this environment — no Jest test either
-- A plugin framework and an Aura-compatible client logger are not built — tracked as roadmap items, not silently dropped
+- A plugin framework for custom automation on `Log__c`/`Log_Entry__c` triggers is not built
+- No scenario-level grouping across transactions (a `LoggerScenario__c`-style concept) — logs group by transaction only
+- No custom field mapping system for extending the data model without touching Apex
+- No auto-tagging rules based on message content — tags are only ever set explicitly via `.addTag()`
+- No "View JSON" quick action, and no mass-delete list-view button — cleanup is scheduled-purge-only
+- No OmniStudio integration, no `Callable`-interface pattern for other packages to optionally depend on this one
+- Aura is intentionally out of scope — not used in any current client org, so not being built
 
 ---
 
