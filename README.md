@@ -421,22 +421,6 @@ See **[`PACKAGING.md`](PACKAGING.md)** for the full `sf package create` → `ver
 
 ---
 
-## Still open
-
-- Bulk behavior above 200 events in a single publish batch, beyond what's tested
-- No test proving `LogAlertQueueable` behavior on a non-200 Slack response (currently swallowed/logged to debug)
-- Global JS error boundary is opt-in per app shell, not auto-wired into every LWC in a client org
-- `Log_Fault_Handler` Flow has no automated test (Flow tests are separate from Apex `RunLocalTests` coverage) — verify manually in a sandbox after deploying, e.g. by wiring it to a deliberately-failing Fault Connector
-- `LogRestSaver` (`REST` save method) is unverified against a live org — see the v1.3 changelog entry above for what's needed before relying on it
-- `logStream` needs read access to `Log_Entry_Event__e` for the running user and hasn't been verified against a live org's Streaming API from this environment — no Jest test either
-- The plugin framework (`LoggerPluginDispatcher`) hasn't been verified against a live org either — the tests mock `Log_Plugin__mdt` lookups and prove the trigger wiring fires, but a real Custom Metadata record pointing at a real plugin class hasn't been deployed and exercised end-to-end
-- No scenario-level grouping across transactions (a `LoggerScenario__c`-style concept) — logs group by transaction only
-- No custom field mapping system for extending the data model without touching Apex
-- No auto-tagging rules based on message content — tags are only ever set explicitly via `.addTag()`
-- No "View JSON" quick action, and no mass-delete list-view button — cleanup is scheduled-purge-only
-- No OmniStudio integration, no `Callable`-interface pattern for other packages to optionally depend on this one
-- Aura is intentionally out of scope — not used in any current client org, so not being built
-
 ---
 
 <div align="center">
