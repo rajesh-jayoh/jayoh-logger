@@ -413,7 +413,7 @@ See **[`PACKAGING.md`](PACKAGING.md)** for the full `sf package create` → `ver
 <summary><strong>v0.1</strong> — Core framework</summary>
 
 - `Log__c` / `Log_Entry__c` / `Log_Entry_Event__e` platform-event pipeline
-- `Logger.cls` + `LoggerInvocable` (Flow/LWC entry points)
+- `Logger.cls` + `LoggerInvocable` (Flow/LWC entry points, later split further in v1.5)
 - Per-Permission-Set/Profile log level control
 - Regex-based masking, scheduled retention purge
 
