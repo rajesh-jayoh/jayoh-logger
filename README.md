@@ -7,8 +7,8 @@
 [![Salesforce](https://img.shields.io/badge/Salesforce-Apex-00A1E0)](https://developer.salesforce.com/)
 [![API Version](https://img.shields.io/badge/API-v67.0-0176D3)](sfdx-project.json)
 [![License](https://img.shields.io/badge/License-Unlicense-lightgrey)](#)
-[![Tests](https://img.shields.io/badge/tests-14%20classes-brightgreen)](#tests)
-[![Status](https://img.shields.io/badge/status-v1.5-brightgreen)](#changelog)
+[![Tests](https://img.shields.io/badge/tests-16%20classes-brightgreen)](#tests)
+[![Status](https://img.shields.io/badge/status-v1.6-brightgreen)](#changelog)
 
 *A native, platform-event-backed logging framework — built for reuse across every client org.*
 
@@ -61,6 +61,7 @@ flowchart LR
 | **Client-side capture** | Global JS error boundary for LWC — uncaught errors stop vanishing into the console |
 | **Reports** | Custom report type + two starter reports (`Recent Errors`, `Errors by Source`) |
 | **Four Flow actions** | Log Message, Add Log Entry for a Record, Add Log Entry for a Record Collection, Save Log |
+| **Plugin framework** | Register your own Apex automation on `Log__c`/`Log_Entry__c` triggers via Custom Metadata — no core code changes |
 
 ---
 
@@ -72,15 +73,18 @@ force-app/main/default/
 │                       LoggerFlowLogMessageAction, LoggerFlowLogRecordAction,
 │                       LoggerFlowLogRecordCollectionAction, LoggerFlowSaveLogAction,
 │                       LoggerFlowSupport, LoggerClientInvocable,
+│                       LoggerPluginTriggerable, LoggerPluginContext, LoggerPluginDispatcher,
+│                       LoggerPluginExampleSetPriority,
 │                       LogEntryEventHandler, LogSaveQueueable, LogRestSaver,
 │                       LogAlertService, LogMasking, LogPurgeBatch,
 │                       LogViewerController, LogLevelSettingSelector …
-├── triggers/           LogEntryEventTrigger  (platform event → durable objects)
+├── triggers/           LogEntryEventTrigger (platform event → durable objects)
+│                       LogTrigger, LogEntryTrigger (dispatch to plugins)
 ├── objects/            Log__c · Log_Entry__c · Log_Entry_Event__e
 │                       Log_Tag__c · Log_Entry_Tag__c
 │                       Log_Level_Setting__mdt · Log_Alert_Setting__mdt
-│                       Log_Masking_Pattern__mdt
-├── customMetadata/     Seeded defaults for the three CMDTs above
+│                       Log_Masking_Pattern__mdt · Log_Plugin__mdt
+├── customMetadata/     Seeded defaults for the four CMDTs above
 ├── lwc/                logViewer, relatedLogEntries, logStream (visible)  ·  loggerClient (headless utility)
 ├── flows/              Log_Fault_Handler (reusable Subflow for Fault Connectors)
 ├── quickActions/       Manage Log (edit Status/Priority/Owner on Log__c)
@@ -248,14 +252,55 @@ Logger.debug('MyBatch.execute', new LogMessage('processed {0} of {1} records', p
 | `Log_Level_Setting__mdt` | Minimum log level per Permission Set/Profile/org; retention days; export-before-purge |
 | `Log_Alert_Setting__mdt` | Email/Slack toggles, recipients, webhook URL |
 | `Log_Masking_Pattern__mdt` | Active regex patterns scrubbed from every message before persist |
+| `Log_Plugin__mdt` | Registers custom Apex automation to run on `Log__c`/`Log_Entry__c` triggers — see [Plugin framework](#plugin-framework) below |
+
+---
+
+## Plugin framework
+
+Add your own automation to `Log__c`/`Log_Entry__c` — auto-escalating priority, custom notifications, syncing to an external system, whatever your org needs — without touching this package's own trigger code.
+
+**1. Implement the interface:**
+```apex
+public class MyLogPriorityPlugin implements LoggerPluginTriggerable {
+    public void execute(LoggerPluginContext context) {
+        if (context.triggerOperationType != System.TriggerOperation.BEFORE_INSERT) {
+            return;
+        }
+        for (Log__c log : (List<Log__c>) context.triggerNew) {
+            if (log.HighestSeverity__c == 'ERROR') {
+                log.Priority__c = 'Critical';
+            }
+        }
+    }
+}
+```
+Your class needs a no-argument constructor — it's instantiated dynamically via `Type.forName(className).newInstance()`.
+
+**2. Register it** with a `Log_Plugin__mdt` record:
+
+| Field | Example |
+|---|---|
+| `SObjectApiName__c` | `Log__c` or `Log_Entry__c` |
+| `ApexClassName__c` | `MyLogPriorityPlugin` |
+| `IsEnabled__c` | `true` |
+| `ExecutionOrder__c` | `0` (lower runs first) |
+
+That's it — `LogTrigger`/`LogEntryTrigger` fire on every insert/update, `LoggerPluginDispatcher` looks up enabled plugins for that object and runs each one in order.
+
+**Safety guarantees the dispatcher provides:**
+- One plugin throwing an exception doesn't stop the others, or block the underlying DML — it's caught and logged to `System.debug` (deliberately not through `Logger` itself, since a plugin error on `Log__c` recursively triggering more `Log__c` inserts would be a footgun)
+- An unregistered/misspelled class name, or a class that doesn't implement `LoggerPluginTriggerable`, is skipped with a debug warning rather than breaking the trigger
+
+An example plugin ships with the package — `LoggerPluginExampleSetPriority` (auto-escalates `Priority__c` to Critical on ERROR severity) — registered but **disabled by default** via its `Log_Plugin__mdt` record. Flip `IsEnabled__c` to `true` to turn it on, or use it as a template.
 
 ---
 
 ## Tests
 
-14 classes, full coverage of the Apex surface:
+16 classes, full coverage of the Apex surface:
 
-`LogLevelTest` · `LogMaskingTest` · `LogLevelSettingSelectorTest` · `LogEntryEventHandlerTest` · `LoggerTest` · `LoggerFlowActionsTest` · `LogPurgeBatchTest` · `LogAlertServiceTest` · `LogAlertQueueableTest` · `LogViewerControllerTest` · `LogEntryBuilderTest` · `LogMessageTest` · `LogRestSaverTest` · `RelatedLogEntriesControllerTest`
+`LogLevelTest` · `LogMaskingTest` · `LogLevelSettingSelectorTest` · `LogEntryEventHandlerTest` · `LoggerTest` · `LoggerFlowActionsTest` · `LogPurgeBatchTest` · `LogAlertServiceTest` · `LogAlertQueueableTest` · `LogViewerControllerTest` · `LogEntryBuilderTest` · `LogMessageTest` · `LogRestSaverTest` · `RelatedLogEntriesControllerTest` · `LoggerPluginDispatcherTest` · `LoggerPluginExampleSetPriorityTest`
 
 > Platform-event delivery in tests uses `Test.getEventBus().deliver()` after `Test.stopTest()` — that's what fires `LogEntryEventTrigger` synchronously so persisted rows can actually be asserted on.
 
@@ -274,6 +319,19 @@ See **[`PACKAGING.md`](PACKAGING.md)** for the full `sf package create` → `ver
 ## Changelog
 
 <details open>
+<summary><strong>v1.6</strong> — Plugin framework</summary>
+
+- **`LoggerPluginTriggerable`** — implement this interface for custom automation on `Log__c`/`Log_Entry__c`
+- **`LoggerPluginDispatcher`** — looks up enabled `Log_Plugin__mdt` records for the object being triggered, instantiates each configured Apex class via `Type.forName().newInstance()`, and runs it in `ExecutionOrder__c` order
+- **`LogTrigger`/`LogEntryTrigger`** — new triggers on `Log__c`/`Log_Entry__c` that call the dispatcher (previously these objects had no triggers of their own)
+- **Safety guarantees:** one plugin throwing doesn't stop the others or block the DML (caught and sent to `System.debug`, deliberately not through `Logger` itself — a plugin error recursively logging on `Log__c` would be a footgun); an unregistered class name or one that doesn't implement the interface is skipped rather than breaking the trigger
+- **`LoggerPluginExampleSetPriority`** — a working example plugin (auto-escalates `Priority__c` to Critical on `ERROR` severity), shipped registered but **disabled by default**
+- New README section: [Plugin framework](#plugin-framework)
+- *Not covered:* plugins that themselves cause recursive `Log__c`/`Log_Entry__c` DML are the plugin author's responsibility to avoid — the dispatcher doesn't guard against that beyond catching exceptions
+
+</details>
+
+<details>
 <summary><strong>v1.5</strong> — Expanded Flow actions and real-time log streaming</summary>
 
 - **Split `LoggerInvocable` into one class per Flow action** (`LoggerFlowLogMessageAction`, `LoggerFlowLogRecordAction`, `LoggerFlowLogRecordCollectionAction`, `LoggerFlowSaveLogAction`, plus `LoggerFlowSupport` for shared logic and `LoggerClientInvocable` for the LWC/Aura entry point) — Flow references an Apex invocable action unambiguously by class name, which breaks down once a single class has more than one `@InvocableMethod`
@@ -371,7 +429,7 @@ See **[`PACKAGING.md`](PACKAGING.md)** for the full `sf package create` → `ver
 - `Log_Fault_Handler` Flow has no automated test (Flow tests are separate from Apex `RunLocalTests` coverage) — verify manually in a sandbox after deploying, e.g. by wiring it to a deliberately-failing Fault Connector
 - `LogRestSaver` (`REST` save method) is unverified against a live org — see the v1.3 changelog entry above for what's needed before relying on it
 - `logStream` needs read access to `Log_Entry_Event__e` for the running user and hasn't been verified against a live org's Streaming API from this environment — no Jest test either
-- A plugin framework for custom automation on `Log__c`/`Log_Entry__c` triggers is not built
+- The plugin framework (`LoggerPluginDispatcher`) hasn't been verified against a live org either — the tests mock `Log_Plugin__mdt` lookups and prove the trigger wiring fires, but a real Custom Metadata record pointing at a real plugin class hasn't been deployed and exercised end-to-end
 - No scenario-level grouping across transactions (a `LoggerScenario__c`-style concept) — logs group by transaction only
 - No custom field mapping system for extending the data model without touching Apex
 - No auto-tagging rules based on message content — tags are only ever set explicitly via `.addTag()`
